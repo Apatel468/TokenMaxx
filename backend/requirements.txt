@@ -1,0 +1,10 @@
+# SmartLLM Router - Python dependencies
+# Install with: pip install -r requirements.txt
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+sqlalchemy>=2.0.25
+litellm>=1.40.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0

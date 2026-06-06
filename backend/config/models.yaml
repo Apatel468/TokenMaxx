@@ -1,0 +1,49 @@
+# Model routing config — read by services/config_loader.py
+#
+# Each task type maps to a Groq model. Edit this file to change routing
+# without touching Python code.
+
+models:
+  flashcards:
+    provider: groq
+    model: llama-3.3-70b-versatile
+    reason: Simple educational task — low-cost Groq model is enough.
+
+  coding:
+    provider: groq
+    model: qwen/qwen3-32b
+    reason: Strong coding/reasoning model available through Groq.
+
+  general_qa:
+    provider: groq
+    model: llama-3.1-8b-instant
+    reason: Fast and cheap for simple questions.
+
+  report:
+    provider: groq
+    model: llama-3.3-70b-versatile
+    reason: Higher-quality writing task.
+
+# Default route when task type is not listed above
+default_task: general_qa
+
+# Premium baseline for savings comparison (not used for routing)
+premium_baseline:
+  label: GPT-4o (Premium)
+  input_per_1k: 0.005
+  output_per_1k: 0.015
+
+# Groq pricing per 1,000 tokens (USD) — illustrative public rates
+pricing:
+  llama-3.3-70b-versatile:
+    input: 0.00059
+    output: 0.00079
+    label: Groq Llama 3.3 70B
+  qwen/qwen3-32b:
+    input: 0.00029
+    output: 0.00059
+    label: Groq Qwen3 32B
+  llama-3.1-8b-instant:
+    input: 0.00005
+    output: 0.00008
+    label: Groq Llama 3.1 8B Instant
