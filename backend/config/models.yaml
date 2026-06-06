@@ -2,6 +2,14 @@
 #
 # Each task type maps to a Groq model. Edit this file to change routing
 # without touching Python code.
+#
+# The LLM classifier (prompt_analyzer.py) may ONLY pick task types listed
+# under "models" below. Add a new key here to make it routable.
+
+# Fast Groq model used only for prompt classification (not chat replies)
+classifier:
+  provider: groq
+  model: llama-3.1-8b-instant
 
 models:
   flashcards:

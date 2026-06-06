@@ -6,7 +6,7 @@ Powers the GET /analytics/* endpoints.
 
 from sqlalchemy.orm import Session
 
-from database import Conversation, Message, ModelRun
+from database import Message, ModelRun
 from models import AnalyticsSummary, ConversationRecord, HistoryRecord, ModelUsageRecord
 
 
@@ -46,46 +46,52 @@ def generate_analytics_summary(db: Session) -> AnalyticsSummary:
     )
 
 
-def get_conversations(db: Session, limit: int = 20) -> list[ConversationRecord]:
-    """
-    Return recent conversations with prompt, response, and routing info.
+def _get_user_message_for_run(db: Session, run: ModelRun) -> Message | None:
+    """Find the user message that belongs to the same turn as this model_run."""
+    if not run.assistant_message_id:
+        return None
 
-    Newest conversations appear first.
+    assistant_msg = db.query(Message).filter(Message.id == run.assistant_message_id).first()
+    if not assistant_msg:
+        return None
+
+    return (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == run.conversation_id,
+            Message.role == "user",
+            Message.created_at <= assistant_msg.created_at,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def get_model_run_records(db: Session, limit: int = 20) -> list[ConversationRecord]:
     """
-    conversations = (
-        db.query(Conversation)
-        .order_by(Conversation.created_at.desc())
+    Return recent model runs — one row per AI reply (supports multi-turn).
+
+    Includes enhanced_prompt from Phase 4 prompt engineering.
+    """
+    runs = (
+        db.query(ModelRun)
+        .order_by(ModelRun.created_at.desc())
         .limit(limit)
         .all()
     )
 
     results: list[ConversationRecord] = []
-
-    for conv in conversations:
-        # Get user and assistant messages for this conversation
-        messages = (
-            db.query(Message)
-            .filter(Message.conversation_id == conv.id)
-            .order_by(Message.created_at.asc())
-            .all()
+    for run in runs:
+        user_msg = _get_user_message_for_run(db, run)
+        assistant_msg = (
+            db.query(Message).filter(Message.id == run.assistant_message_id).first()
         )
-        user_msg = next((m for m in messages if m.role == "user"), None)
-        assistant_msg = next((m for m in messages if m.role == "assistant"), None)
-
-        # Get routing + cost row
-        run = (
-            db.query(ModelRun)
-            .filter(ModelRun.conversation_id == conv.id)
-            .first()
-        )
-
-        if not run:
-            continue
 
         results.append(
             ConversationRecord(
-                conversation_id=conv.id,
+                conversation_id=run.conversation_id,
                 prompt=user_msg.content if user_msg else "",
+                enhanced_prompt=run.enhanced_prompt or "",
                 response=assistant_msg.content if assistant_msg else "",
                 task_type=run.task_type,
                 selected_model=run.selected_model,
@@ -103,27 +109,46 @@ def get_conversations(db: Session, limit: int = 20) -> list[ConversationRecord]:
     return results
 
 
+def get_conversations(db: Session, limit: int = 20) -> list[ConversationRecord]:
+    """Return recent model runs (alias for analytics conversation rows)."""
+    return get_model_run_records(db, limit=limit)
+
+
 def get_history(db: Session, limit: int = 20) -> list[HistoryRecord]:
     """
     Return recent chat history for GET /analytics/history.
 
-    Same data as conversations, with field names matched to the API spec.
+    Each row is one model_run (one turn), including enhanced_prompt when stored.
     """
-    conversations = get_conversations(db, limit=limit)
-    return [
-        HistoryRecord(
-            id=row.conversation_id,
-            prompt=row.prompt,
-            response=row.response,
-            task_type=row.task_type,
-            selected_model=row.selected_model,
-            actual_cost=row.estimated_cost,
-            premium_cost=row.premium_model_cost,
-            savings_percentage=row.savings_percentage,
-            timestamp=row.timestamp,
+    runs = (
+        db.query(ModelRun)
+        .order_by(ModelRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    results: list[HistoryRecord] = []
+    for run in runs:
+        user_msg = _get_user_message_for_run(db, run)
+        assistant_msg = (
+            db.query(Message).filter(Message.id == run.assistant_message_id).first()
         )
-        for row in conversations
-    ]
+        results.append(
+            HistoryRecord(
+                id=run.id,
+                prompt=user_msg.content if user_msg else "",
+                enhanced_prompt=run.enhanced_prompt or "",
+                response=assistant_msg.content if assistant_msg else "",
+                task_type=run.task_type,
+                selected_model=run.selected_model,
+                actual_cost=run.estimated_cost,
+                premium_cost=run.premium_model_cost,
+                savings_percentage=run.savings_percentage,
+                timestamp=run.created_at,
+            )
+        )
+
+    return results
 
 
 def get_model_usage(db: Session) -> list[ModelUsageRecord]:

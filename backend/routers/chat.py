@@ -1,9 +1,13 @@
 """
-Chat router — multi-turn conversations with Groq routing (Phase 3A).
+Chat router — multi-turn conversations with Groq routing (Phase 4).
 
-POST /chat accepts an optional conversation_id:
-  - omit it  → start a new conversation
-  - include it → load prior messages, send full context to the model
+POST /chat pipeline:
+  1. Load prior messages (optional conversation_id)
+  2. Classify prompt (prompt_analyzer)
+  3. Enhance prompt (prompt_enhancer via context_builder)
+  4. Route to Groq model (router_engine)
+  5. Generate response (model_clients + LiteLLM)
+  6. Track costs and persist to SQLite
 """
 
 from fastapi import APIRouter, Depends
@@ -32,9 +36,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     1. Load prior messages if conversation_id is provided.
     2. Classify the latest prompt (task type).
-    3. Build context including full message history.
+    3. Enhance prompt and build context (includes full message history).
     4. Route to the best Groq model.
-    5. Call Groq with the full conversation context.
+    5. Call Groq with system prompt + enhanced conversation context.
     6. Save user + assistant messages and routing metrics.
     """
     # Step 1: Load existing thread (if continuing a conversation)
@@ -43,16 +47,16 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         get_conversation_or_404(db, request.conversation_id)
         prior_messages = load_message_history(db, request.conversation_id)
 
-    # Step 2: Classify the latest user message
+    # Step 2: Classify the latest user message (Groq LLM, or keywords if unavailable)
     analysis = analyze_prompt(request.prompt)
 
-    # Step 3: Build context with prior turns for token estimate + model history
+    # Step 3: Enhance prompt + build context (prompt_enhancer runs inside build_context)
     context = build_context(request.prompt, analysis, prior_messages=prior_messages)
 
     # Step 4: Pick Groq model from config/models.yaml
     decision = route(context)
 
-    # Step 5: Send full message history to Groq (or mock fallback)
+    # Step 5: Send system prompt + enhanced history to Groq (or mock fallback)
     model_response = generate_response(
         decision.groq_model,
         context,
@@ -63,7 +67,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     costs = estimate_costs(decision.model_id, context, model_response)
     log_request_metrics(decision.model_id, context.task_type, model_response, costs)
 
-    # Step 7: Persist user message, assistant reply, and model_run
+    # Step 7: Persist original user text + enhancement metadata + model_run
     conversation_id = save_chat_turn(
         db=db,
         prompt=request.prompt,
@@ -73,11 +77,18 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         model_response=model_response,
         costs=costs,
         conversation_id=request.conversation_id,
+        enhanced_prompt=context.enhanced_prompt,
+        system_prompt=context.system_prompt,
+        enhancement_reason=context.enhancement_reason,
     )
 
     return ChatResponse(
         conversation_id=conversation_id,
         original_prompt=request.prompt,
+        enhanced_prompt=context.enhanced_prompt,
+        system_prompt=context.system_prompt,
+        enhancement_reason=context.enhancement_reason,
+        enhancement_method=context.enhancement_method,
         task_type=context.task_type,
         selected_model=decision.model_label,
         reason_selected=decision.reason,

@@ -36,6 +36,18 @@ class ChatResponse(BaseModel):
 
     conversation_id: int
     original_prompt: str
+    enhanced_prompt: str = Field(
+        description="Task-wrapped prompt sent to the LLM (user intent preserved)."
+    )
+    system_prompt: str = Field(
+        description="System instructions applied for this task type."
+    )
+    enhancement_reason: str = Field(
+        description="Short explanation of what enhancement rules were applied."
+    )
+    enhancement_method: str = Field(
+        description='How the prompt was enhanced: "ai" or "rule_fallback".'
+    )
     task_type: str
     selected_model: str
     reason_selected: str
@@ -87,6 +99,7 @@ class HistoryRecord(BaseModel):
 
     id: int
     prompt: str
+    enhanced_prompt: str = ""
     response: str
     task_type: str
     selected_model: str
@@ -104,6 +117,7 @@ class ConversationRecord(BaseModel):
 
     conversation_id: int
     prompt: str
+    enhanced_prompt: str = ""
     response: str
     task_type: str
     selected_model: str

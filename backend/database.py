@@ -21,7 +21,9 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    text,
 )
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
 DATABASE_URL = "sqlite:///./smartllm_router.db"
@@ -125,6 +127,11 @@ class ModelRun(Base):
     latency_ms = Column(Float, nullable=False, default=0.0)
     is_mock = Column(Boolean, nullable=False, default=False)
 
+    # Phase 4 — prompt enhancement (stored for analytics/history)
+    enhanced_prompt = Column(Text, nullable=True)
+    system_prompt = Column(Text, nullable=True)
+    enhancement_reason = Column(Text, nullable=True)
+
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -157,6 +164,33 @@ class ChatHistory(Base):
 def init_db() -> None:
     """Create all tables if they don't exist yet. Called on app startup."""
     Base.metadata.create_all(bind=engine)
+    _migrate_model_runs_columns()
+
+
+def _migrate_model_runs_columns() -> None:
+    """
+    Add Phase 4 columns to existing SQLite databases.
+
+    create_all() does not alter existing tables, so we run safe ALTER TABLE
+    statements for databases created before prompt enhancement was added.
+    """
+    new_columns = (
+        ("enhanced_prompt", "TEXT"),
+        ("system_prompt", "TEXT"),
+        ("enhancement_reason", "TEXT"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+                conn.commit()
+            except OperationalError:
+                # Column already exists — safe to ignore
+                conn.rollback()
 
 
 def get_db():

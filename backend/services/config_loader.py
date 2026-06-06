@@ -65,3 +65,31 @@ def get_pricing() -> dict:
 def get_premium_baseline() -> dict:
     """Return premium baseline used for savings % calculation."""
     return load_models_config().get("premium_baseline", {})
+
+
+def get_allowed_task_types() -> list[str]:
+    """
+    Return task type keys the LLM classifier is allowed to choose.
+
+    These are the top-level keys under "models" in models.yaml.
+    """
+    config = load_models_config()
+    return list(config["models"].keys())
+
+
+def get_default_task_type() -> str:
+    """Return the fallback task type when classification is uncertain."""
+    return load_models_config().get("default_task", "general_qa")
+
+
+def get_classifier_config() -> dict:
+    """
+    Return the Groq model used for LLM-based prompt classification.
+
+    Falls back to general_qa's model if "classifier" is missing from YAML.
+    """
+    config = load_models_config()
+    if "classifier" in config:
+        return config["classifier"]
+    default_key = config.get("default_task", "general_qa")
+    return config["models"][default_key]

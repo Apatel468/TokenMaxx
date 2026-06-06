@@ -76,6 +76,27 @@ def _to_litellm_model(groq_model: str) -> str:
     return f"groq/{groq_model}"
 
 
+def _build_litellm_messages(
+    context: PromptContext,
+    messages: list[dict] | None = None,
+) -> list[dict]:
+    """
+    Build the message list for LiteLLM.
+
+    Phase 4: prepends system_prompt, then conversation history with the
+    enhanced latest user message from context_builder.
+    """
+    history = messages or context.message_history or [
+        {"role": "user", "content": context.enhanced_prompt or context.prompt}
+    ]
+
+    litellm_messages: list[dict] = []
+    if context.system_prompt:
+        litellm_messages.append({"role": "system", "content": context.system_prompt})
+    litellm_messages.extend(history)
+    return litellm_messages
+
+
 def _call_groq(
     groq_model: str,
     context: PromptContext,
@@ -84,15 +105,12 @@ def _call_groq(
     """
     Call Groq through LiteLLM.
 
-    Uses full conversation history when provided (Phase 3A multi-turn).
+    Uses system prompt + full conversation history (Phase 4 enhanced).
     """
     import litellm
 
     litellm_model = _to_litellm_model(groq_model)
-    # Full thread for follow-ups, or single user message for new chats
-    litellm_messages = messages or context.message_history or [
-        {"role": "user", "content": context.prompt}
-    ]
+    litellm_messages = _build_litellm_messages(context, messages=messages)
 
     start = time.perf_counter()
     response = litellm.completion(model=litellm_model, messages=litellm_messages)

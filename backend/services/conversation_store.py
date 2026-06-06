@@ -51,6 +51,9 @@ def save_chat_turn(
     model_response: ModelResponse,
     costs: CostEstimate,
     conversation_id: int | None = None,
+    enhanced_prompt: str = "",
+    system_prompt: str = "",
+    enhancement_reason: str = "",
 ) -> int:
     """
     Save one user message + assistant reply (+ model_run).
@@ -101,6 +104,9 @@ def save_chat_turn(
         savings_percentage=costs.savings_percentage,
         latency_ms=model_response.latency_ms,
         is_mock=model_response.is_mock,
+        enhanced_prompt=enhanced_prompt,
+        system_prompt=system_prompt,
+        enhancement_reason=enhancement_reason,
     )
     db.add(model_run)
     db.commit()
