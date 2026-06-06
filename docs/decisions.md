@@ -1,146 +1,102 @@
 # SmartLLM Router — Architectural Decisions
 
 > Record of major decisions, tradeoffs, and rules for future developers.  
+> **Version:** 0.2.0 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
 
 ---
 
 ## Technology Choices
 
-### FastAPI (Backend framework)
-**Decision:** Use FastAPI over Flask/Django.  
-**Why:** Auto OpenAPI docs, Pydantic validation, async-ready, beginner-friendly.  
-**Tradeoff:** Less built-in admin/ORM than Django; acceptable for MVP.
+(Unchanged from v0.1 — FastAPI, SQLite, LiteLLM, Groq-only, React+Vite, YAML config, plain CSS.)
 
-### SQLite (Database)
-**Decision:** SQLite for MVP persistence.  
-**Why:** Zero setup, single file, perfect for demos and local dev.  
-**Tradeoff:** No concurrent writes at scale; migrate to PostgreSQL before production.  
-**🔒 Do not** switch to Postgres without adding migrations and updating deployment docs.
-
-### LiteLLM (LLM gateway)
-**Decision:** Use LiteLLM instead of direct Groq SDK calls.  
-**Why:** Unified API surface; easy to add providers later with one-line model string changes.  
-**Tradeoff:** Extra dependency layer; debugging can be opaque.
-
-### Groq-only provider (Phase 2 pivot)
-**Decision:** Remove active OpenAI/Anthropic/Gemini paths; only Groq is wired.  
-**Why:** Simplify MVP, one API key, fast inference, low cost for demos.  
-**Tradeoff:** Less impressive "multi-provider router" story until Phase 5.  
-**Note:** Early code comments may still mention other providers historically.
-
-### React + Vite (Frontend)
-**Decision:** React 18 with Vite, no Next.js, no UI component library.  
-**Why:** User requested beginner-friendly stack; minimal magic; fast dev server.  
-**Tradeoff:** More manual CSS; no SSR/SEO (fine for internal demo).
-
-### Plain CSS (No Tailwind/MUI)
-**Decision:** Custom CSS variables in `index.css` + `App.css`.  
-**Why:** Fewer dependencies; easier for beginners to read.  
-**Tradeoff:** Slower to build complex UIs.
-
-### YAML config (`config/models.yaml`)
-**Decision:** Externalize routing, pricing, and premium baseline to YAML.  
-**Why:** Change models without code deploy; non-developers can edit routes.  
-**Tradeoff:** Config cached in memory at startup — **requires server restart** after YAML edits.  
-**🔒 Do not** hard-code model routing in Python without strong justification.
+See prior sections in git history or `project_memory.md` for full rationale.
 
 ---
 
 ## Architectural Decisions
 
-### Service layer between routers and persistence
-**Decision:** Business logic lives in `backend/services/`, not in routers.  
-**Why:** Testability, separation of concerns, beginner-readable modules.  
-**🔒 Keep routers thin** — orchestration only.
+### Service layer between routers and persistence 🔒
+Business logic in `backend/services/`; routers orchestrate only.
 
-### Keyword classifier (not ML)
-**Decision:** Regex keyword matching for task classification.  
-**Why:** Zero latency, zero cost, no extra API call, easy to understand.  
-**Tradeoff:** Brittle; misroutes ambiguous or multi-intent prompts.  
-**Future:** Replace with small LLM classifier (see roadmap Phase 4).
+### LLM classifier with keyword fallback (Phase 3B)
+**Decision:** Primary classification via Groq `llama-3.1-8b-instant` + LiteLLM JSON mode; keyword rules as fallback.  
+**Why:** More accurate task routing than keywords alone; still works offline without API key.  
+**Tradeoff:** Extra Groq call (+latency, +cost) on every chat request.  
+**Config:** `models.yaml` → `classifier` block; allowed types from `models` keys.
 
-### GPT-4o as savings baseline (not Groq premium)
-**Decision:** Compare all costs against GPT-4o rates from YAML, not best Groq model.  
-**Why:** Clear narrative: "You saved X% vs always using premium OpenAI."  
-**Tradeoff:** Savings % is illustrative, not a literal invoice comparison.
+### AI Prompt Engineering Agent with rule fallback (Phase 4)
+**Decision:** Primary enhancement via Groq `llama-3.1-8b-instant` returning JSON (`enhanced_prompt`, `system_prompt`, `enhancement_reason`); rule templates as fallback.  
+**Why:** Smarter prompt wrapping than static templates; preserves user intent with explicit safety rules in agent prompt.  
+**Tradeoff:** Second Groq call per request; total of **3 Groq calls** when API key present (classify + enhance + respond).  
+**Model location:** Hardcoded `ENHANCER_MODEL` in `prompt_enhancer.py` (same as classifier — cheapest Groq model).  
+**API:** `enhancement_method` field exposes `"ai"` vs `"rule_fallback"`.
 
-### Mock fallback always available
-**Decision:** Missing `GROQ_API_KEY` or Groq API errors → mock response, never 500.  
-**Why:** Demo works offline; resilient MVP.  
-**Tradeoff:** User may not realize they got a mock unless they read response prefix.
+### Original user text preserved in DB
+**Decision:** `messages.content` for user role stores **original** prompt; enhanced version stored on `model_runs.enhanced_prompt`.  
+**Why:** UI shows what user typed; analytics can audit what was sent to the model.
 
-### Three-table conversation schema
-**Decision:** `conversations` + `messages` + `model_runs` (not one flat table).  
-**Why:** Multi-turn memory, per-turn routing metrics, clean analytics aggregation.  
-**Tradeoff:** More joins; analytics code must handle multiple model_runs per conversation.
+### System prompt sent separately to LiteLLM
+**Decision:** `model_clients._build_litellm_messages()` prepends `{"role": "system", "content": system_prompt}` before history.  
+**Why:** Standard chat API pattern; downstream model gets clear behavioral instructions.
 
-### Per-turn re-routing in conversations
-**Decision:** Each new message in a thread re-classifies task type and may pick a different model.  
-**Why:** Latest message intent may differ from thread start (e.g. started with coding, then asks Q&A).  
-**Tradeoff:** Inconsistent model within thread; may confuse users.  
-**Future consideration:** Lock model per conversation or re-route only on explicit task change.
+### Only latest user turn is enhanced in multi-turn chats
+**Decision:** Prior messages in `message_history` stay as originally stored; only the new message gets AI/rule enhancement.  
+**Why:** Avoid re-processing entire thread each turn; prior assistant replies already reflect earlier context.
 
-### Full history sent to Groq every turn
-**Decision:** No truncation; entire `message_history` passed to LiteLLM.  
-**Why:** Simplest correct multi-turn behavior for MVP.  
-**Tradeoff:** Token limits, cost growth, latency on long threads.  
-**🔒 Add truncation before production** — see roadmap M8.
+### GPT-4o as savings baseline 🔒
+Illustrative savings vs premium — not a live OpenAI call.
 
-### `conversation_id` optional on POST /chat
-**Decision:** Omit id → new conversation; include id → append to thread.  
-**Why:** RESTful simplicity; no separate "create conversation" endpoint needed.
+### Mock fallback on final response only (enhance/classify use rules)
+**Decision:** Missing key → keyword classify + rule enhance + mock chat response.  
+**Why:** Demo still works end-to-end without Groq.
 
-### Analytics aggregates from `model_runs` (not legacy `chat_history`)
-**Decision:** Phase 3 analytics read `model_runs` table exclusively.  
-**Why:** Richer per-turn data (tokens, latency, mock flag).  
-**Known gap:** `/analytics/history` conversation view only surfaces first exchange — **bug to fix**.
+### Analytics per `model_run` (fixed in Phase 4)
+**Decision:** `GET /analytics/history` iterates `model_runs`, not one row per conversation.  
+**Why:** Multi-turn threads produce multiple turns; each includes `enhanced_prompt`.
+
+### Schema migration via startup ALTER
+**Decision:** `database._migrate_model_runs_columns()` adds Phase 4 columns to existing SQLite DBs.  
+**Why:** No Alembic yet; `create_all` doesn't alter existing tables.  
+**Tradeoff:** Fragile for production — migrate to Alembic before deploy 🔒.
 
 ---
 
 ## Assumptions
 
-1. **Single user / no auth** — Anyone with API access can read all conversations.
-2. **Local development only** — Ports 8001 (backend) and 5173 (frontend).
-3. **English prompts** — Keyword rules tuned for English.
-4. **USD pricing** — All cost numbers illustrative from public rate cards.
-5. **One Groq API key** — Shared across all requests; no per-user keys.
-6. **Trust client for conversation_id** — No ownership check on threads.
-7. **~4 chars per token** — Used when LiteLLM doesn't return usage (mocks).
+1. Single user / no auth
+2. English prompts (classifier + enhancer tuned for English)
+3. One shared `GROQ_API_KEY`
+4. ~4 chars/token when usage missing
+5. Three Groq calls per chat acceptable for MVP demo cost
 
 ---
 
 ## Important Implementation Notes
 
 ### Environment variables
-- Only `GROQ_API_KEY` is used in active code path.
-- Loaded via `python-dotenv` in `main.py` and `model_clients.py`.
-- **🔒 NEVER read, log, display, or commit `.env` file contents** (explicit project rule).
+- `GROQ_API_KEY` — used by `prompt_analyzer`, `prompt_enhancer`, `model_clients`
+- **🔒 NEVER read, log, or commit `.env` contents**
 
-### LiteLLM model string format
+### LiteLLM model strings
 ```
-YAML model: llama-3.3-70b-versatile  →  litellm: groq/llama-3.3-70b-versatile
-YAML model: qwen/qwen3-32b           →  litellm: groq/qwen/qwen3-32b
+llama-3.1-8b-instant  →  groq/llama-3.1-8b-instant
+qwen/qwen3-32b        →  groq/qwen/qwen3-32b
 ```
-See `model_clients._to_litellm_model()`.
+
+### Three Groq touchpoints per request (with API key)
+| Step | File | Model |
+|------|------|-------|
+| Classify | `prompt_analyzer.py` | classifier from YAML (8B instant) |
+| Enhance | `prompt_enhancer.py` | ENHANCER_MODEL (8B instant) |
+| Respond | `model_clients.py` | routed from YAML |
 
 ### Config cache
-`config_loader._config_cache` is populated once. Restart uvicorn after editing `models.yaml`.
-
-### Database file location
-`sqlite:///./smartllm_router.db` — relative to **current working directory** when uvicorn starts. Always run from `backend/` directory.
-
-### CORS origins
-Hardcoded: `http://localhost:5173`, `http://127.0.0.1:5173`. Update if frontend port changes.
+Restart uvicorn after editing `models.yaml`.
 
 ### Response field naming debt
-`ChatResponse.mock_response` contains real Groq text too — legacy name from Phase 1. Renaming is a breaking API change; plan for v0.2.
-
-### Pydantic v2 Config
-Some models use `class Config: from_attributes = True` (Pydantic v1 style). Still works in Pydantic v2.
-
-### Windows development
-Project developed on Windows; paths use backslashes in docs but code uses `pathlib` for portability. Port 8000 frequently conflicts — **standard port is 8001**.
+- `ChatResponse.mock_response` — holds real Groq text too (legacy name)
+- Plan rename in M12
 
 ---
 
@@ -148,13 +104,13 @@ Project developed on Windows; paths use backslashes in docs but code uses `pathl
 
 | Item | Reason |
 |------|--------|
-| `config/models.yaml` structure | Breaks config_loader, cost_tracker, models router |
-| `model_runs` schema | Breaks analytics aggregations |
-| Mock fallback behavior | Demo reliability depends on it |
-| GPT-4o premium baseline semantics | Product story and savings % meaning |
-| `.env` gitignore | Security |
-| Service layer pattern | Testability and readability |
-| Groq-only in model_clients (unless Phase 5) | Scope control |
+| `config/models.yaml` structure | Breaks config_loader, classifier allowed types |
+| `model_runs` schema + enhancement columns | Breaks analytics |
+| Mock fallback on chat response | Demo reliability |
+| GPT-4o baseline semantics | Product story |
+| Preserve-original-prompt-in-messages rule | UI + audit correctness |
+| Groq-only in model_clients | Scope control |
+| Safety rules in prompt_enhancer | Prevent hallucinated enhancements |
 
 ---
 
@@ -162,37 +118,39 @@ Project developed on Windows; paths use backslashes in docs but code uses `pathl
 
 | Alternative | Why rejected |
 |-------------|--------------|
-| Hard-coded routing in Python | Changed to YAML in Phase 2 |
-| One new conversation per `/chat` always | Changed in Phase 3A for memory |
-| OpenAI/Anthropic/Gemini active paths | Groq-only pivot for simplicity |
-| React Router | Overkill for two tabs |
-| Tailwind CSS | User wanted beginner-friendly plain CSS |
-| Separate classifier LLM call | Cost + latency for MVP |
-| PostgreSQL from day one | SQLite sufficient for MVP |
+| Keyword-only classifier (permanent) | Replaced by LLM classifier in M8 |
+| Rule-only prompt enhancement (permanent) | Replaced by AI agent in M9; kept as fallback |
+| LLM enhancement without fallback | Demo must work without Groq |
+| Enhancing entire conversation history each turn | Cost + complexity |
+| Separate OpenAI/Anthropic paths | Groq-only pivot |
 
 ---
 
 ## Decision Log (Chronological)
 
-| Date (approx) | Decision |
-|---------------|----------|
-| Phase 1 | Mock-first MVP, keyword routing |
-| Phase 2 | LiteLLM integration, multi-provider then Groq-only |
-| Phase 2 | YAML externalized routing |
-| Phase 3 | Three-table SQLite schema |
-| Phase 3 | Analytics endpoints + dashboard |
-| Phase 3A | Multi-turn conversation_id + full history to model |
-| Phase 3A | GET /conversations endpoints |
-| Docs | Permanent memory in docs/ folder |
+| Phase | Decision |
+|-------|----------|
+| 1 | Mock-first MVP, keyword routing |
+| 2 | LiteLLM, Groq-only, YAML routing |
+| 3 | Analytics schema, dashboard |
+| 3A | Multi-turn memory |
+| 3B | LLM classifier + keyword fallback |
+| 4 | AI prompt engineering agent + rule fallback |
+| 4 | enhancement_method in API; store enhanced_prompt in model_runs |
+| 4 | Analytics history per model_run |
+| Docs | Updated for v0.2.0 |
+| Git | Pushed to github.com/Apatel468/smartllm-router |
 
 ---
 
 ## Questions for Future Review
 
-1. Should routing lock to first message's model within a conversation?
-2. Should `total_chats` in analytics count conversations or model_runs (turns)?
-3. Should we expose per-turn analytics in `/analytics/history`?
+1. Should enhancer model move to `models.yaml` (like classifier)?
+2. Cache classification/enhancement for identical prompts?
+3. Should `enhancement_method` be stored in SQLite?
 4. When to rename `mock_response` → `response`?
-5. Is GPT-4o still the right savings baseline as Groq adds premium models?
+5. Is 3 Groq calls per turn acceptable at scale?
 
 Document answers here when decided.
+
+---

@@ -1,6 +1,7 @@
 # SmartLLM Router — Architecture
 
-> Technical architecture reference. Pair with `project_memory.md` for context.
+> Technical architecture reference. Pair with `project_memory.md` for context.  
+> **Version:** 0.2.0 · **Last updated:** June 2026
 
 ---
 
@@ -10,357 +11,191 @@ SmartLLM Router is a **monolithic two-tier application**:
 
 | Tier | Role |
 |------|------|
-| **Presentation** | React SPA (Vite dev server or static build) |
-| **Application** | FastAPI monolith with service layer |
-| **Data** | SQLite file database |
+| **Presentation** | React SPA (Vite, port 5173) |
+| **Application** | FastAPI monolith (port 8001) |
+| **Data** | SQLite (`smartllm_router.db`) |
 | **External** | Groq API via LiteLLM |
 
-There is no separate BFF, message queue, cache, or auth service in the MVP.
-
-```
-                    ┌─────────────┐
-                    │   Browser   │
-                    └──────┬──────┘
-                           │ HTTP
-              ┌────────────▼────────────┐
-              │   React Frontend        │
-              │   (port 5173)           │
-              └────────────┬────────────┘
-                           │ JSON REST
-              ┌────────────▼────────────┐
-              │   FastAPI Backend       │
-              │   (port 8001)           │
-              │                         │
-              │  ┌─────────────────┐   │
-              │  │    Routers      │   │
-              │  └────────┬────────┘   │
-              │           │             │
-              │  ┌────────▼────────┐   │
-              │  │    Services     │   │
-              │  └────────┬────────┘   │
-              │           │             │
-              │  ┌────────▼────────┐   │
-              │  │ SQLAlchemy ORM  │   │
-              │  └────────┬────────┘   │
-              └───────────┼─────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  smartllm_router.db   │
-              └───────────────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  Groq API (LiteLLM)   │
-              └───────────────────────┘
-```
+No background workers, agents framework, or auth service in MVP.
 
 ---
 
-## Backend Architecture
-
-### Layering
-
-```
-main.py
-  └── routers/          HTTP layer — thin, delegates to services
-        └── services/   Business logic — no HTTP concerns
-              └── database.py   Persistence models
-              └── config/models.yaml   Externalized routing config
-```
-
-**Principle:** Routers validate I/O (Pydantic) and orchestrate; services contain logic.
-
-### Router Modules
-
-| Module | Prefix | Responsibility |
-|--------|--------|------------------|
-| `chat.py` | `/chat` | End-to-end chat pipeline |
-| `conversations.py` | `/conversations` | List/load threads |
-| `analytics.py` | `/analytics` | Aggregated stats |
-| `models.py` | `/models` | Model catalog from YAML |
-
-### Service Modules
+## Backend Service Layer
 
 | Service | Input | Output | Notes |
 |---------|-------|--------|-------|
-| `prompt_analyzer` | prompt string | `AnalysisResult` | Keyword regex matching |
-| `context_builder` | prompt + analysis + prior messages | `PromptContext` | Token estimates, message_history |
-| `router_engine` | `PromptContext` | `RoutingDecision` | Reads YAML via config_loader |
+| `prompt_analyzer` | prompt string | `AnalysisResult` | Groq LLM JSON classify; keyword fallback |
+| `prompt_enhancer` | prompt + task metadata + history | `EnhancementResult` | Groq AI agent JSON; rule fallback |
+| `context_builder` | prompt + analysis + prior msgs | `PromptContext` | Calls enhancer; builds `message_history` |
+| `router_engine` | `PromptContext` | `RoutingDecision` | Reads `models.yaml` |
 | `config_loader` | — | YAML dict | Cached; task aliases |
-| `model_clients` | groq_model + context + messages | `ModelResponse` | LiteLLM or mock |
-| `cost_tracker` | model_id + context + response | `CostEstimate` | YAML pricing |
-| `conversation_store` | chat turn data | conversation_id | CRUD for threads |
-| `report_generator` | DB session | analytics DTOs | Aggregations |
-
-### Application Lifecycle
-
-1. `load_dotenv()` in `main.py` before imports that need env
-2. `logging.basicConfig` at INFO level
-3. `lifespan` → `init_db()` creates tables via SQLAlchemy `create_all`
-4. CORS middleware for Vite origins only
+| `model_clients` | model + context + messages | `ModelResponse` | Prepends system prompt; mock fallback |
+| `cost_tracker` | model + context + response | `CostEstimate` | vs GPT-4o baseline |
+| `conversation_store` | turn data | `conversation_id` | SQLite CRUD |
+| `report_generator` | DB session | analytics DTOs | Per-`model_run` history |
 
 ---
 
-## Frontend Architecture
-
-### Structure
+## POST /chat Data Flow
 
 ```
-App.jsx                    Tab shell (Chat | Analytics)
-├── ChatPage.jsx           3-column: sidebar | thread | routing panel
-└── AnalyticsDashboard.jsx Summary + tables + history
-
-api/
-├── config.js              API_BASE constant
-├── chat.js                POST /chat
-├── conversations.js       GET /conversations*
-└── analytics.js           GET /analytics/*
-```
-
-**No React Router** — tab state is local `useState` in `App.jsx`.
-
-**No global state library** — each component manages its own fetch/state.
-
-### ChatPage State Model
-
-| State | Purpose |
-|-------|---------|
-| `conversationId` | Active thread (null = new chat) |
-| `messages` | Current thread messages for display |
-| `conversations` | Sidebar list from GET /conversations |
-| `prompt` | Input textarea value |
-| `result` | Latest POST /chat routing response |
-| `loading` / `error` | UX flags |
-
-### Data Flow (Frontend)
-
-```
-User submits prompt
-  → sendChat(prompt, conversationId)
-  → POST /chat
-  → response includes conversation_id
-  → fetchConversation(id) to refresh thread
-  → loadConversationList() to refresh sidebar
-  → onChatComplete() bumps analytics refresh counter
+Client: { prompt, conversation_id? }
+        │
+        ▼
+conversation_store.load_message_history()
+        │
+        ▼
+prompt_analyzer.analyze_prompt()
+  ├─ Groq llama-3.1-8b-instant (JSON: task_type, difficulty, risk_level, reason)
+  └─ fallback: keyword rules
+        │
+        ▼
+context_builder.build_context()
+  └─ prompt_enhancer.enhance_prompt()
+       ├─ Groq llama-3.1-8b-instant (JSON: enhanced_prompt, system_prompt, reason)
+       └─ fallback: rule-based templates
+        │
+        ▼
+router_engine.route() → models.yaml
+        │
+        ▼
+model_clients.generate_response()
+  messages = [system_prompt] + prior_history + [enhanced_user_message]
+  └─ Groq routed model OR mock
+        │
+        ▼
+cost_tracker.estimate_costs()
+        │
+        ▼
+conversation_store.save_chat_turn()
+  messages: original user text + assistant reply
+  model_runs: routing, costs, enhanced_prompt, system_prompt, enhancement_reason
+        │
+        ▼
+ChatResponse (includes enhancement_method: "ai" | "rule_fallback")
 ```
 
 ---
 
-## Data Flow — POST /chat (Detailed)
+## Prompt Classification (`prompt_analyzer.py`)
 
-```
-Client JSON: { prompt, conversation_id? }
-        │
-        ▼
-┌───────────────────┐
-│ conversation_store│──► load_message_history (if id set)
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ prompt_analyzer   │──► task_type, confidence, keywords
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ context_builder   │──► estimated tokens, message_history[]
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ router_engine     │──► groq model + reason (from YAML)
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ model_clients     │──► LiteLLM completion(full history)
-└───────────────────┘    or mock if no key / error
-        │
-        ▼
-┌───────────────────┐
-│ cost_tracker      │──► actual vs premium costs
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│ conversation_store│──► save user msg, assistant msg, model_run
-└───────────────────┘
-        │
-        ▼
-ChatResponse JSON to client
-```
+### Primary: LLM Classifier
+- **Model:** `groq/llama-3.1-8b-instant` (from `models.yaml` → `classifier`)
+- **Output JSON:** `task_type`, `difficulty`, `risk_level`, `reason`
+- **Allowed task_type:** keys in `models.yaml` → `models` (flashcards, coding, general_qa, report)
+
+### Fallback: Keyword Classifier
+- Regex word-boundary matching
+- Extra types: summarization, creative_writing, data_analysis, translation
+- Mapped to YAML via `config_loader._TASK_ALIASES`
 
 ---
 
-## API Flow — Read Endpoints
+## Prompt Engineering (`prompt_enhancer.py`)
 
-### Conversations
-- `GET /conversations` → `conversation_store.list_conversations`
-- `GET /conversations/{id}` → `conversation_store.get_conversation_detail`
+### Primary: AI Prompt Engineering Agent
+- **Model:** `groq/llama-3.1-8b-instant` (`ENHANCER_MODEL` constant)
+- **Output JSON:** `enhanced_prompt`, `system_prompt`, `enhancement_reason`
+- **Rules:** Preserve user meaning; no fake facts; improve clarity/structure
+- **Task hints:** flashcards (Q/A), coding (comments/edge cases), report (headings), summarization (bullets), general_qa (concise)
 
-### Analytics
-- `GET /analytics/summary` → `report_generator.generate_analytics_summary` (aggregates `model_runs`)
-- `GET /analytics/history` → `report_generator.get_history` (maps conversation records)
-- `GET /analytics/model-usage` → `report_generator.get_model_usage` (groups `model_runs` by model)
+### Fallback: Rule-Based Enhancement
+- Fixed templates in `_TASK_RULES` (no API call)
+- Same safety constraints appended to system prompt
+- Sets `enhancement_method = "rule_fallback"`
 
-### Models
-- `GET /models` → reads `models.yaml` pricing + routing entries
+### What gets sent to the response model
+- **System message:** `system_prompt` from enhancer
+- **User history:** prior turns unchanged (original text from DB)
+- **Latest turn:** `enhanced_prompt` (not raw user text)
+- **Stored in DB:** user `messages.content` = original prompt; `model_runs.enhanced_prompt` = enhanced version
 
 ---
 
-## Model Routing Flow
-
-```
-User prompt (latest message only for classification)
-        │
-        ▼
-┌─────────────────────────────────────┐
-│ prompt_analyzer._KEYWORD_RULES      │
-│ Score keyword hits per task type    │
-│ Winner = highest score, else QA     │
-└─────────────────┬───────────────────┘
-                  │ task_type
-                  ▼
-┌─────────────────────────────────────┐
-│ config_loader.get_route_for_task    │
-│ 1. Direct YAML match                │
-│ 2. Alias (e.g. summarization→report)│
-│ 3. default_task: general_qa         │
-└─────────────────┬───────────────────┘
-                  │
-                  ▼
-         models.yaml entry:
-         { provider: groq, model: ..., reason: ... }
-                  │
-                  ▼
-┌─────────────────────────────────────┐
-│ model_clients._to_litellm_model     │
-│ → groq/{model_name}               │
-│ litellm.completion(messages=history)│
-└─────────────────────────────────────┘
-```
-
-### Current YAML Routing Table
+## Model Routing (`router_engine.py` + `models.yaml`)
 
 | YAML Key | Groq Model | Use Case |
 |----------|------------|----------|
-| `flashcards` | `llama-3.3-70b-versatile` | Educational / flashcard tasks |
-| `coding` | `qwen/qwen3-32b` | Code and reasoning |
+| `flashcards` | `llama-3.3-70b-versatile` | Educational Q/A |
+| `coding` | `qwen/qwen3-32b` | Code / reasoning |
 | `general_qa` | `llama-3.1-8b-instant` | Fast cheap Q&A |
-| `report` | `llama-3.3-70b-versatile` | Reports, writing (also alias target) |
+| `report` | `llama-3.3-70b-versatile` | Reports / writing |
 
-### Task Type Aliases (analyzer → YAML)
-
-| Analyzer Output | Routed Via |
-|-----------------|------------|
-| `summarization` | `report` |
-| `creative_writing` | `report` |
-| `data_analysis` | `report` |
-| `translation` | `general_qa` |
-| unmatched | `default_task` → `general_qa` |
+**Aliases:** summarization/creative_writing/data_analysis → report; translation → general_qa
 
 ---
 
 ## Database Schema
 
-### Entity Relationship
+### `model_runs` (one row per AI reply)
 
-```
-conversations (1) ──< (N) messages
-conversations (1) ──< (N) model_runs
-messages (1) ──< (0..1) model_runs.assistant_message_id
-```
+| Column | Notes |
+|--------|-------|
+| Routing | task_type, selected_model, reason_selected |
+| Tokens / cost | input_tokens, output_tokens, estimated_cost, premium_model_cost, savings_* |
+| Performance | latency_ms, is_mock |
+| **Phase 4** | enhanced_prompt, system_prompt, enhancement_reason |
 
-### Table: `conversations`
+Migration: `database._migrate_model_runs_columns()` adds columns to existing DBs on startup.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | INTEGER PK | Exposed as `conversation_id` |
-| created_at | DATETIME UTC | |
-| updated_at | DATETIME UTC | Updated on new messages |
-
-### Table: `messages`
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | INTEGER PK | |
-| conversation_id | FK | Indexed |
-| role | STRING(20) | `user` or `assistant` |
-| content | TEXT | Full prompt/response |
-| created_at | DATETIME UTC | |
-
-### Table: `model_runs`
-
-One row per assistant reply (per `/chat` turn).
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | INTEGER PK | |
-| conversation_id | FK | |
-| assistant_message_id | FK nullable | Links to assistant message |
-| task_type | STRING | From analyzer |
-| selected_model | STRING | Groq model id from YAML |
-| reason_selected | TEXT | From YAML |
-| input_tokens, output_tokens | INTEGER | From LiteLLM or estimate |
-| estimated_cost | FLOAT | USD |
-| premium_model_cost | FLOAT | USD (GPT-4o baseline) |
-| savings_usd | FLOAT | premium - actual |
-| savings_percentage | FLOAT | |
-| latency_ms | FLOAT | Wall clock |
-| is_mock | BOOLEAN | True if mock response |
-| created_at | DATETIME UTC | |
-
-### Legacy: `chat_history`
-
-Flat table from Phase 1. **Not written by current code.** Safe to deprecate.
+### Other tables
+- `conversations` — thread metadata
+- `messages` — user/assistant content (user = **original** prompt)
+- `chat_history` — legacy, unused
 
 ---
 
-## Service Relationships (Dependency Graph)
+## Analytics Flow
+
+- `GET /analytics/summary` — aggregates all `model_runs`
+- `GET /analytics/history` — one row per `model_run` (newest first), includes `enhanced_prompt`
+- `GET /analytics/model-usage` — grouped by `selected_model`
+
+---
+
+## Frontend Architecture
+
+- `App.jsx` — Chat | Analytics tabs
+- `ChatPage.jsx` — sidebar, thread, routing panel (does not yet show enhancement fields)
+- `AnalyticsDashboard.jsx` — summary, model usage, history
+- `api/config.js` — `API_BASE = http://127.0.0.1:8001`
+
+---
+
+## Service Dependency Graph
 
 ```
 chat.py
   ├── prompt_analyzer
-  ├── context_builder ──► prompt_analyzer (types only)
-  ├── router_engine ──► config_loader, context_builder
+  ├── context_builder ──► prompt_enhancer
+  │                    └── prompt_analyzer (types)
+  ├── router_engine ──► config_loader
   ├── model_clients ──► context_builder
-  ├── cost_tracker ──► config_loader, context_builder, model_clients
-  └── conversation_store ──► cost_tracker, model_clients, router_engine
-
-analytics.py ──► report_generator ──► database models
-
-conversations.py ──► conversation_store
-
-models.py ──► config_loader
+  ├── cost_tracker
+  └── conversation_store
 ```
-
-**Note:** `cost_tracker` imports `ModelResponse` from `model_clients` — avoid circular imports if refactoring.
 
 ---
 
-## Future Scaling Considerations
+## LiteLLM Integration Points
 
-| Concern | Current | Future Approach |
-|---------|---------|-----------------|
-| Database | SQLite file | PostgreSQL for concurrency |
-| Config hot-reload | In-memory cache | File watcher or admin API |
-| LLM calls | Sync blocking | Async + streaming + queue |
-| Auth | None | API keys per user, JWT |
-| Horizontal scale | Single process | Stateless API + shared DB |
-| Token limits | Full history sent | Summarization / sliding window |
-| Observability | stdout logs | Structured logging, metrics |
-| Provider failover | Mock fallback | Multi-provider retry chain |
-| Frontend | Hardcoded API URL | Env-based config, CDN deploy |
+| Call site | Model | Purpose |
+|-----------|-------|---------|
+| `prompt_analyzer._analyze_with_llm` | `groq/llama-3.1-8b-instant` | Classify |
+| `prompt_enhancer._enhance_with_ai` | `groq/llama-3.1-8b-instant` | Enhance |
+| `model_clients._call_groq` | `groq/{routed_model}` | Generate response |
+
+All use `GROQ_API_KEY` from environment. Mock fallback only on final response step (and rule fallbacks for classify/enhance).
 
 ---
 
-## Deployment Topology (Future)
+## Future Scaling
 
-```
-[CDN] → Static React build
-          ↓
-[Load Balancer] → [FastAPI x N] → [PostgreSQL]
-                        ↓
-                   [LiteLLM Proxy] → Groq / others
-```
+| Concern | Current | Future |
+|---------|---------|--------|
+| 3 Groq calls per turn | Sync blocking | Cache classification; async pipeline |
+| Token limits | Full history | Truncation / summarization |
+| DB | SQLite + ALTER migrations | PostgreSQL + Alembic |
+| Auth | None | API keys / JWT |
 
-Not implemented in MVP.
+---

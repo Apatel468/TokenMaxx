@@ -1,15 +1,16 @@
 # SmartLLM Router — Project Memory
 
 > **Permanent project context.** This file is the single source of truth when chat history is unavailable.  
-> **Version:** 0.1.0 MVP · **Last audited:** June 2026
+> **Version:** 0.2.0 · **Last audited:** June 2026  
+> **GitHub:** https://github.com/Apatel468/smartllm-router
 
 ---
 
 ## Project Vision
 
-**SmartLLM Router** is a demo/MVP web application that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves the concept of **task-aware model selection** and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
+**SmartLLM Router** is a demo/MVP web application that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves the concept of **task-aware model selection**, **prompt engineering**, and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
 
-The product narrative: *"Don't pay premium prices for simple tasks — let the router pick the right Groq model for the job and show you how much you saved."*
+The product narrative: *"Don't pay premium prices for simple tasks — classify the request, engineer the prompt, route to the right Groq model, and show how much you saved."*
 
 ---
 
@@ -17,10 +18,11 @@ The product narrative: *"Don't pay premium prices for simple tasks — let the r
 
 Organizations and developers often default to one expensive LLM (e.g. GPT-4o) for every request. Many tasks — flashcards, simple Q&A, summarization — do not need premium reasoning. SmartLLM Router:
 
-1. **Classifies** what kind of task the user is asking for
-2. **Routes** to a cheaper Groq model configured for that task type
-3. **Tracks** estimated token cost vs. a premium baseline
-4. **Persists** conversations and analytics for audit and demo purposes
+1. **Classifies** what kind of task the user is asking for (Groq LLM or keyword fallback)
+2. **Enhances** the prompt with task-specific structure (AI agent or rule fallback)
+3. **Routes** to a cheaper Groq model configured for that task type
+4. **Tracks** estimated token cost vs. a premium baseline
+5. **Persists** conversations and analytics for audit and demo purposes
 
 ---
 
@@ -39,10 +41,12 @@ Organizations and developers often default to one expensive LLM (e.g. GPT-4o) fo
                              │
      ┌───────────────────────┼───────────────────────┐
      ▼                       ▼                       ▼
- prompt_analyzer      router_engine            model_clients
- (keyword classify)   (config/models.yaml)     (LiteLLM → Groq)
+ prompt_analyzer      prompt_enhancer         router_engine
+ (Groq LLM classify)  (Groq AI agent + rules) (models.yaml)
      │                       │                       │
-     └──────────► context_builder ◄─────────────────┘
+     └──────────► context_builder ◄──────────────────┘
+                             │
+                    model_clients (LiteLLM → Groq)
                              │
               cost_tracker + conversation_store
                              │
@@ -50,6 +54,11 @@ Organizations and developers often default to one expensive LLM (e.g. GPT-4o) fo
               SQLite: smartllm_router.db
               (conversations, messages, model_runs)
 ```
+
+**Per chat request with `GROQ_API_KEY`:** up to **3 Groq calls** via LiteLLM:
+1. Classifier — `llama-3.1-8b-instant`
+2. Prompt engineer — `llama-3.1-8b-instant`
+3. Response model — routed from YAML (70B, Qwen, or 8B instant)
 
 ---
 
@@ -73,22 +82,16 @@ Organizations and developers often default to one expensive LLM (e.g. GPT-4o) fo
 ```
 smartllm-router/
 ├── backend/
-│   ├── main.py                    # App entry, CORS, logging, router mounts
-│   ├── database.py                # SQLAlchemy models + engine
-│   ├── models.py                  # Pydantic API schemas
+│   ├── main.py
+│   ├── database.py
+│   ├── models.py
 │   ├── requirements.txt
-│   ├── .env.example               # GROQ_API_KEY template (never commit .env)
-│   ├── .gitignore
-│   ├── smartllm_router.db         # Runtime SQLite (gitignored)
-│   ├── config/
-│   │   └── models.yaml            # Routing, pricing, premium baseline
-│   ├── routers/
-│   │   ├── chat.py
-│   │   ├── conversations.py
-│   │   ├── analytics.py
-│   │   └── models.py
+│   ├── .env.example
+│   ├── config/models.yaml
+│   ├── routers/ (chat, conversations, analytics, models)
 │   └── services/
-│       ├── prompt_analyzer.py
+│       ├── prompt_analyzer.py    # LLM classifier + keyword fallback
+│       ├── prompt_enhancer.py    # AI prompt engineering agent + rule fallback
 │       ├── context_builder.py
 │       ├── router_engine.py
 │       ├── config_loader.py
@@ -96,24 +99,13 @@ smartllm-router/
 │       ├── cost_tracker.py
 │       ├── conversation_store.py
 │       └── report_generator.py
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│       ├── main.jsx
-│       ├── App.jsx
-│       ├── App.css / index.css
-│       ├── api/ (config.js, chat.js, conversations.js, analytics.js)
-│       └── components/ (ChatPage.jsx, AnalyticsDashboard.jsx)
-└── docs/                          # THIS FOLDER — permanent memory
+├── frontend/src/ ...
+└── docs/
     ├── project_memory.md
     ├── architecture.md
     ├── roadmap.md
     └── decisions.md
 ```
-
-**Originally planned but NOT created:** `docs/system_design.md`, `docs/model_catalog.md`, `docs/demo_script.md`
 
 ---
 
@@ -123,68 +115,73 @@ smartllm-router/
 |------|--------|
 | Backend core pipeline | ✅ Complete |
 | Groq + LiteLLM integration | ✅ Complete |
+| LLM task classifier | ✅ Complete |
+| AI prompt engineering agent | ✅ Complete (Phase 4) |
+| Rule-based fallbacks (classify + enhance) | ✅ Complete |
 | Mock fallback (no API key) | ✅ Complete |
 | YAML-driven routing | ✅ Complete |
-| SQLite persistence | ✅ Complete |
+| SQLite persistence + enhancement fields | ✅ Complete |
 | Multi-turn conversations | ✅ Complete (Phase 3A) |
 | Analytics API + dashboard | ✅ Complete |
+| Analytics history per model_run | ✅ Complete |
 | Frontend chat UI | ✅ Complete |
+| Frontend shows enhancement fields | ❌ Not started |
 | Auth / multi-user | ❌ Not started |
 | Streaming responses | ❌ Not started |
 | Tests | ❌ Not started |
 | Production deploy | ❌ Not started |
-| Multi-provider routing | ❌ Removed (Groq-only pivot) |
 
-**Development maturity:** Functional local MVP suitable for demos and iteration. Not production-ready.
+**Development maturity:** Functional local MVP with AI classification and prompt engineering. Not production-ready.
 
 ---
 
 ## Completed Features
 
 ### Phase 1 — MVP Backend
-- FastAPI app with `/health` and `POST /chat`
-- Keyword-based task classification (`prompt_analyzer.py`)
-- Mock model responses without API keys
-- Cost estimation vs GPT-4o premium baseline
-- Beginner-friendly comments throughout
+- FastAPI, keyword classifier (now fallback), mock responses, cost tracking
 
-### Phase 2 — Real AI (Groq-only pivot)
-- LiteLLM integration
-- `GROQ_API_KEY` from `.env` (presence check only in code — never log/read key value in tooling)
-- Real Groq completions via `litellm.completion()`
-- Automatic mock fallback on missing key or API errors
-- Routing moved to `config/models.yaml`
+### Phase 2 — Groq + LiteLLM
+- Real Groq completions, YAML routing, mock fallback
 
 ### Phase 3 — Analytics
-- SQLite tables: `conversations`, `messages`, `model_runs`
-- `GET /analytics/summary`, `/analytics/history`, `/analytics/model-usage`
-- Frontend Analytics Dashboard tab
+- `conversations`, `messages`, `model_runs` tables
+- Analytics endpoints + dashboard
 
 ### Phase 3A — Conversation Memory
-- Optional `conversation_id` on `POST /chat`
-- Load prior messages → build full context → send to Groq
-- `GET /conversations`, `GET /conversations/{id}`
-- Frontend: conversation sidebar, message thread, New Chat button
+- Multi-turn `conversation_id`, full history to Groq, sidebar UI
+
+### Phase 3B — LLM Classifier
+- `prompt_analyzer.py` uses Groq `llama-3.1-8b-instant` via LiteLLM
+- Returns JSON: `task_type`, `difficulty`, `risk_level`, `reason`
+- Allowed `task_type` values from `models.yaml`
+- Keyword classifier fallback when Groq fails or no API key
+
+### Phase 4 — Prompt Engineering
+- `prompt_enhancer.py` — AI Prompt Engineering Agent (Groq `llama-3.1-8b-instant`)
+- Returns JSON: `enhanced_prompt`, `system_prompt`, `enhancement_reason`
+- Rule-based fallback when Groq fails or no API key
+- `enhancement_method` in API: `"ai"` or `"rule_fallback"`
+- `model_runs` stores `enhanced_prompt`, `system_prompt`, `enhancement_reason`
+- `POST /chat` returns original + enhanced prompts and enhancement metadata
+- `model_clients` prepends `system_prompt` to LiteLLM messages
 
 ### Frontend
-- Chat tab with routing/cost panel
-- Analytics tab with summary cards, model usage table, history list
-- API base URL: `http://127.0.0.1:8001` (hardcoded in `frontend/src/api/config.js`)
+- Chat + Analytics tabs; API base `http://127.0.0.1:8001`
 
 ---
 
-## Unfinished / Incomplete Features
+## POST /chat Pipeline (Current)
 
-1. **Documentation originally scoped** — `system_design.md`, `model_catalog.md`, `demo_script.md` never written (replaced by this docs set)
-2. **Streaming** — All responses are blocking; no SSE/WebSocket
-3. **Token window management** — Full history sent every turn; no truncation
-4. **Per-turn routing in threads** — Each new message re-classifies and may pick a different model (by design for now, may confuse users)
-5. **Analytics for multi-turn** — `/analytics/history` shows only first user/assistant pair per conversation (see Known Bugs)
-6. **Environment-based frontend API URL** — Port 8001 hardcoded
-7. **Database migrations** — No Alembic; schema changes use `create_all` only
-8. **Legacy `chat_history` table** — Orphaned; not written by current code
-9. **Unit/integration tests** — None
-10. **Additional LLM providers** — OpenAI/Anthropic/Gemini were explored then removed in Groq-only pivot
+```
+1. Load prior messages (optional conversation_id)
+2. prompt_analyzer.analyze_prompt()     → task_type, difficulty, risk_level
+3. context_builder.build_context()      → calls prompt_enhancer.enhance_prompt()
+4. router_engine.route()                → Groq model from models.yaml
+5. model_clients.generate_response()    → system + enhanced history → Groq
+6. cost_tracker.estimate_costs()
+7. conversation_store.save_chat_turn()  → SQLite
+8. ChatResponse JSON
+```
 
 ---
 
@@ -193,14 +190,40 @@ smartllm-router/
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/health` | Liveness check |
-| POST | `/chat` | Send prompt; optional `conversation_id` |
+| POST | `/chat` | Full pipeline; optional `conversation_id` |
 | GET | `/conversations` | List conversation summaries |
 | GET | `/conversations/{id}` | Full message thread |
 | GET | `/analytics/summary` | Aggregate cost/savings |
-| GET | `/analytics/history` | Recent chat rows |
+| GET | `/analytics/history` | Recent turns (per `model_run`, includes `enhanced_prompt`) |
 | GET | `/analytics/model-usage` | Per-model stats |
-| GET | `/models` | Groq model catalog from YAML |
+| GET | `/models` | Groq catalog from YAML |
 | GET | `/docs` | Swagger UI |
+
+### POST /chat Response Fields (key)
+
+| Field | Description |
+|-------|-------------|
+| `original_prompt` | What the user typed |
+| `enhanced_prompt` | AI/rule-wrapped prompt sent to response model |
+| `system_prompt` | System instructions for response model |
+| `enhancement_reason` | Why enhancement was applied |
+| `enhancement_method` | `"ai"` or `"rule_fallback"` |
+| `task_type` | Classified task |
+| `selected_model` | Routed Groq model label |
+| `mock_response` | AI response text (legacy field name) |
+
+---
+
+## Groq Models in Use
+
+| Role | Model | Config location |
+|------|-------|-----------------|
+| Classifier | `llama-3.1-8b-instant` | `models.yaml` → `classifier` |
+| Prompt engineer | `llama-3.1-8b-instant` | Hardcoded in `prompt_enhancer.py` |
+| flashcards / report | `llama-3.3-70b-versatile` | `models.yaml` → `models` |
+| coding | `qwen/qwen3-32b` | `models.yaml` → `models` |
+| general_qa | `llama-3.1-8b-instant` | `models.yaml` → `models` |
+| Savings baseline (not called) | GPT-4o rates | `models.yaml` → `premium_baseline` |
 
 ---
 
@@ -208,27 +231,21 @@ smartllm-router/
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `GROQ_API_KEY` | Optional* | Groq API access via LiteLLM |
+| `GROQ_API_KEY` | Optional* | Classifier, prompt engineer, and chat via LiteLLM |
 
-\*Without it, all responses are mocks. Copy `backend/.env.example` → `backend/.env`.
+\*Without it: keyword classify, rule-based enhance, mock chat responses.
 
-**Security rule for contributors/agents:** Never read, log, or commit `.env` contents.
+**Security rule:** Never read, log, or commit `.env` contents.
 
 ---
 
 ## How to Run
 
 ```bash
-# Backend (use port 8001 — port 8000 often conflicts on Windows)
 cd backend
-python -m venv venv
-venv\Scripts\pip install -r requirements.txt   # Windows
-cp .env.example .env                           # add GROQ_API_KEY
 venv\Scripts\python -m uvicorn main:app --reload --port 8001
 
-# Frontend
 cd frontend
-npm install
 npm run dev
 # → http://localhost:5173
 ```
@@ -237,38 +254,25 @@ npm run dev
 
 ## Known Bugs & Technical Debt
 
-See `docs/decisions.md` and `docs/architecture.md` for detail. Summary:
-
-- Port 8000 conflict on some machines; use **8001**
 - `main.py` docstring still mentions port 8000
-- Analytics history incomplete for multi-turn conversations (only first exchange)
-- Keyword classifier misroutes ambiguous prompts
 - No context length limits — long threads may hit Groq token limits
-- `ChatResponse.mock_response` field name is legacy (holds real responses too)
-- Config YAML cached in memory — file edits require server restart
-- `report_generator.get_conversations` used by analytics duplicates logic in `conversation_store`
-
----
-
-## Important Project Context
-
-- Built as a **beginner-friendly learning MVP** with extensive inline comments
-- Evolved through phases: mock → multi-provider LiteLLM → **Groq-only** → analytics → multi-turn memory
-- User explicitly requested **never accessing `.env` file contents** in AI tooling
-- Database was reset at least once during development (`smartllm_router.db` deleted and recreated)
-- `backend/venv/` exists locally; dependencies also installed to user Python in some sessions
+- `ChatResponse.mock_response` legacy field name
+- Config YAML cached — restart server after edits
+- Frontend does not display enhancement fields yet
+- No Alembic migrations (uses `create_all` + manual ALTER for new columns)
+- Legacy `chat_history` table orphaned
+- No automated tests
 
 ---
 
 ## Recommended Next Steps
 
-1. **Fix analytics multi-turn display** — History should show all turns or per-`model_run` rows
-2. **Add context truncation** — Sliding window or summarize-old-messages before Groq call
-3. **Frontend env config** — `VITE_API_BASE` instead of hardcoded 8001
-4. **Streaming responses** — Better UX for long Groq outputs
-5. **Tests** — At minimum: prompt_analyzer, config_loader, cost_tracker unit tests; one `/chat` integration test
-6. **Alembic migrations** — Before schema changes in production
-7. **Remove or migrate `chat_history`** legacy table
+1. **Frontend** — Show `enhancement_method`, enhanced prompt in Chat UI
+2. **Context truncation** — Sliding window before Groq calls
+3. **`VITE_API_BASE`** — Env-based frontend API URL
+4. **Streaming** — SSE for response generation
+5. **Tests** — Unit tests for analyzer, enhancer, cost_tracker; one integration test
+6. **Alembic** — Proper migrations before production
 
 ---
 
@@ -279,58 +283,50 @@ Copy everything below into a **new Cursor chat** to continue development:
 ---
 
 ```
-You are continuing development on SmartLLM Router — an MVP that routes user prompts to cost-effective Groq models via LiteLLM, tracks savings vs GPT-4o premium baseline, and stores conversations in SQLite.
+You are continuing development on SmartLLM Router — an MVP that classifies prompts,
+engineers them with an AI agent, routes to cost-effective Groq models via LiteLLM,
+tracks savings vs GPT-4o baseline, and stores conversations in SQLite.
 
-READ FIRST (in order):
-1. docs/project_memory.md  — full project context
-2. docs/architecture.md    — system design and data flows
-3. docs/decisions.md       — do-not-break rules
-4. docs/roadmap.md         — what's done and what's next
+READ FIRST:
+1. docs/project_memory.md
+2. docs/architecture.md
+3. docs/decisions.md
+4. docs/roadmap.md
+
+GITHUB: https://github.com/Apatel468/smartllm-router
 
 STACK:
-- Backend: Python FastAPI + SQLAlchemy + SQLite + LiteLLM (Groq only)
-- Frontend: React 18 + Vite, plain CSS
-- Config: backend/config/models.yaml (routing + pricing)
+- Backend: FastAPI + SQLAlchemy + SQLite + LiteLLM (Groq only)
+- Frontend: React 18 + Vite
+- Config: backend/config/models.yaml
 - Secrets: GROQ_API_KEY in backend/.env — NEVER read or log .env contents
 
 RUN:
   cd backend && venv\Scripts\python -m uvicorn main:app --reload --port 8001
   cd frontend && npm run dev
-  Frontend: http://localhost:5173
-  API docs: http://127.0.0.1:8001/docs
 
 KEY FILES:
-- backend/routers/chat.py — main POST /chat pipeline
-- backend/services/prompt_analyzer.py — keyword task classification
-- backend/services/router_engine.py — reads models.yaml
-- backend/services/model_clients.py — LiteLLM Groq + mock fallback
-- backend/services/conversation_store.py — multi-turn SQLite persistence
-- backend/config/models.yaml — edit routing without code changes
-- frontend/src/components/ChatPage.jsx — multi-turn UI with sidebar
-- frontend/src/api/config.js — API_BASE = http://127.0.0.1:8001
+- backend/routers/chat.py — POST /chat orchestration
+- backend/services/prompt_analyzer.py — Groq LLM classifier + keyword fallback
+- backend/services/prompt_enhancer.py — Groq AI prompt agent + rule fallback
+- backend/services/context_builder.py — enhancement + message_history
+- backend/services/router_engine.py — YAML routing
+- backend/services/model_clients.py — LiteLLM chat + system prompt prepend
+- backend/config/models.yaml — classifier, routes, pricing
 
 POST /chat FLOW:
-1. Optional conversation_id → load prior messages from SQLite
-2. analyze_prompt(latest message) → task_type
-3. build_context → token estimate + message_history
-4. route(task_type) → Groq model from YAML
-5. generate_response → litellm.completion with full history
-6. estimate_costs → vs GPT-4o baseline from YAML
-7. save_chat_turn → conversations + messages + model_runs
+1. Load prior messages (optional conversation_id)
+2. analyze_prompt() → task_type, difficulty, risk_level
+3. build_context() → enhance_prompt() → enhanced_prompt, system_prompt
+4. route() → Groq model from YAML
+5. generate_response() → litellm with system + enhanced history
+6. estimate_costs() + save_chat_turn()
 
-TASK TYPES (analyzer): coding, summarization, creative_writing, data_analysis, flashcards, report, general_qa, translation
-YAML ROUTES: flashcards, coding, general_qa, report (+ aliases for other analyzer types)
+GROQ CALLS (with API key): classifier (8B) → prompt engineer (8B) → response model (routed)
 
-CURRENT PHASE: 3A complete. Next priorities in docs/roadmap.md — likely analytics multi-turn fix, context truncation, tests.
+CURRENT PHASE: 4 complete. Next: frontend enhancement UI, truncation, tests, streaming.
 
-CONSTRAINTS:
-- Keep code beginner-friendly and commented
-- Do not commit .env
-- Groq-only unless explicitly asked to add providers
-- Match existing patterns in services/ and routers/
-- Default backend port: 8001
-
-Before making changes, read the relevant service files. Ask clarifying questions only if requirements are ambiguous.
+CONSTRAINTS: Beginner-friendly comments, Groq-only, port 8001, do not commit .env
 ```
 
 ---
