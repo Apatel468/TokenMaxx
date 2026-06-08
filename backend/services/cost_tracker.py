@@ -1,18 +1,43 @@
 """
 Cost Tracker — estimates token usage and dollar costs.
 
-Pricing is loaded from config/models.yaml.
-Savings compare each Groq model vs. the premium baseline (GPT-4o) in YAML.
+Pricing numbers are illustrative (based on common public rates).
+We always compare against a single "premium" baseline (gpt-4o) so
+the savings percentage is easy to understand.
 """
 
-import logging
 from dataclasses import dataclass
 
-from services.config_loader import get_premium_baseline, get_pricing
 from services.context_builder import PromptContext
 from services.model_clients import ModelResponse
 
-logger = logging.getLogger(__name__)
+
+# Cost per 1,000 tokens (USD) — input and output priced separately
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    "gpt-4o": {
+        "input": 0.005,
+        "output": 0.015,
+        "label": "GPT-4o (Premium)",
+    },
+    "gpt-4o-mini": {
+        "input": 0.00015,
+        "output": 0.0006,
+        "label": "GPT-4o Mini (Standard)",
+    },
+    "claude-3-haiku": {
+        "input": 0.00025,
+        "output": 0.00125,
+        "label": "Claude 3 Haiku (Economy)",
+    },
+    "gemini-flash": {
+        "input": 0.000075,
+        "output": 0.0003,
+        "label": "Gemini Flash (Economy)",
+    },
+}
+
+# The expensive model we compare everything against
+PREMIUM_MODEL_ID = "gpt-4o"
 
 
 @dataclass
@@ -27,26 +52,15 @@ class CostEstimate:
 
 
 def _calculate_cost(
-    input_per_1k: float,
-    output_per_1k: float,
+    model_id: str,
     input_tokens: int,
     output_tokens: int,
 ) -> float:
-    """Compute USD cost from per-1k rates and token counts."""
-    input_cost = (input_tokens / 1000) * input_per_1k
-    output_cost = (output_tokens / 1000) * output_per_1k
+    """Compute USD cost for a given model and token counts."""
+    pricing = MODEL_PRICING[model_id]
+    input_cost = (input_tokens / 1000) * pricing["input"]
+    output_cost = (output_tokens / 1000) * pricing["output"]
     return round(input_cost + output_cost, 6)
-
-
-def _get_model_rates(model_id: str) -> tuple[float, float]:
-    """
-    Look up Groq input/output rates for a model from models.yaml.
-
-    Falls back to llama-3.1-8b-instant rates if the model is unknown.
-    """
-    pricing = get_pricing()
-    rates = pricing.get(model_id) or pricing.get("llama-3.1-8b-instant", {})
-    return rates.get("input", 0.00005), rates.get("output", 0.00008)
 
 
 def estimate_costs(
@@ -55,25 +69,16 @@ def estimate_costs(
     model_response: ModelResponse,
 ) -> CostEstimate:
     """
-    Compare Groq model cost vs. premium baseline from YAML.
+    Compare the cost of the chosen model vs. always using premium.
 
-    Uses real token counts from LiteLLM when available; otherwise estimates.
+    Savings % = (premium_cost - actual_cost) / premium_cost * 100
+    If premium is cheaper (shouldn't happen), savings is 0.
     """
-    input_tokens = model_response.input_tokens or context.estimated_input_tokens
+    input_tokens = context.estimated_input_tokens
     output_tokens = model_response.estimated_output_tokens
 
-    # Actual cost — Groq model selected by the router
-    groq_in, groq_out = _get_model_rates(selected_model_id)
-    actual_cost = _calculate_cost(groq_in, groq_out, input_tokens, output_tokens)
-
-    # Premium cost — GPT-4o baseline from YAML (what we save vs.)
-    baseline = get_premium_baseline()
-    premium_cost = _calculate_cost(
-        baseline.get("input_per_1k", 0.005),
-        baseline.get("output_per_1k", 0.015),
-        input_tokens,
-        output_tokens,
-    )
+    actual_cost = _calculate_cost(selected_model_id, input_tokens, output_tokens)
+    premium_cost = _calculate_cost(PREMIUM_MODEL_ID, input_tokens, output_tokens)
 
     if premium_cost > 0 and actual_cost < premium_cost:
         savings = ((premium_cost - actual_cost) / premium_cost) * 100
@@ -86,29 +91,4 @@ def estimate_costs(
         savings_percentage=round(savings, 2),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-    )
-
-
-def log_request_metrics(
-    model_id: str,
-    task_type: str,
-    model_response: ModelResponse,
-    costs: CostEstimate,
-) -> None:
-    """Log model, tokens, latency, and estimated cost for each chat request."""
-    logger.info(
-        "Request metrics | groq_model=%s | litellm_model=%s | mock=%s | "
-        "task=%s | input_tokens=%d | output_tokens=%d | "
-        "latency_ms=%.1f | actual_cost_usd=%.6f | premium_cost_usd=%.6f | "
-        "savings_pct=%.1f",
-        model_id,
-        model_response.litellm_model,
-        model_response.is_mock,
-        task_type,
-        costs.input_tokens,
-        costs.output_tokens,
-        model_response.latency_ms,
-        costs.actual_cost,
-        costs.premium_cost,
-        costs.savings_percentage,
     )

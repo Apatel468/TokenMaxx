@@ -1,12 +1,12 @@
 /**
- * AnalyticsDashboard — shows SQLite stats from the backend.
+ * Analytics Dashboard — live stats from backend SQLite via REST API.
  *
- * Fetches three endpoints on load:
- *   GET /analytics/summary
- *   GET /analytics/history
- *   GET /analytics/model-usage
+ * Data sources (no hardcoded numbers):
+ *   GET /analytics/summary      → KPI cards
+ *   GET /analytics/model-usage  → model breakdown table
+ *   GET /analytics/history      → recent conversations
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchHistory,
   fetchModelUsage,
@@ -21,6 +21,11 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString();
 }
 
+function truncate(text, max = 180) {
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 function AnalyticsDashboard({ onRefresh }) {
   const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
@@ -28,14 +33,13 @@ function AnalyticsDashboard({ onRefresh }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  /** Load all analytics data from the backend */
-  async function loadAnalytics() {
+  const loadAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [summaryData, historyData, usageData] = await Promise.all([
         fetchSummary(),
-        fetchHistory(20),
+        fetchHistory(25),
         fetchModelUsage(),
       ]);
       setSummary(summaryData);
@@ -49,144 +53,167 @@ function AnalyticsDashboard({ onRefresh }) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  // Fetch on mount; re-fetch when parent bumps refreshKey
   useEffect(() => {
     loadAnalytics();
-  }, [onRefresh]);
+  }, [loadAnalytics, onRefresh]);
 
-  if (loading) {
-    return (
-      <div className="analytics-page">
-        <div className="loading-state">
-          <div className="spinner" />
-          <p>Loading analytics…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="analytics-page">
-        <div className="alert alert--error">{error}</div>
-        <button type="button" className="prompt-form__submit" onClick={loadAnalytics}>
-          Retry
-        </button>
-      </div>
-    );
-  }
+  const totalRuns = modelUsage.reduce((sum, row) => sum + row.run_count, 0);
 
   return (
     <div className="analytics-page">
-      <div className="analytics-header">
-        <h2 className="panel__title">Analytics Dashboard</h2>
-        <button type="button" className="analytics-refresh" onClick={loadAnalytics}>
-          Refresh
+      <header className="analytics-header">
+        <div>
+          <h2 className="analytics-header__title">Analytics</h2>
+          <p className="analytics-header__subtitle">
+            Live usage and savings from stored chat requests
+          </p>
+        </div>
+        <button
+          type="button"
+          className="analytics-refresh"
+          onClick={loadAnalytics}
+          disabled={loading}
+        >
+          {loading ? "Refreshing…" : "Refresh"}
         </button>
-      </div>
+      </header>
 
-      {/* Summary stat cards */}
-      <div className="analytics-summary-grid">
-        <div className="stat-card">
-          <span className="stat-card__label">Total Chats</span>
-          <span className="stat-card__value">{summary.total_chats}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card__label">Total Cost</span>
-          <span className="stat-card__value">{formatCost(summary.total_cost)}</span>
-        </div>
-        <div className="stat-card cost-card--premium">
-          <span className="stat-card__label">Premium Baseline</span>
-          <span className="stat-card__value">
-            {formatCost(summary.premium_baseline_cost)}
-          </span>
-        </div>
-        <div className="stat-card cost-card--savings">
-          <span className="stat-card__label">Total Savings</span>
-          <span className="stat-card__value cost-card__value--savings">
-            {formatCost(summary.total_savings)}
-          </span>
-        </div>
-        <div className="stat-card cost-card--savings">
-          <span className="stat-card__label">Savings %</span>
-          <span className="stat-card__value cost-card__value--savings">
-            {summary.savings_percentage.toFixed(1)}%
-          </span>
-        </div>
-      </div>
+      {error && (
+        <div className="alert alert--error analytics-error">{error}</div>
+      )}
 
-      {/* Model usage table */}
-      <section className="panel">
-        <h3 className="panel__title">Model Usage</h3>
-        {modelUsage.length === 0 ? (
-          <p className="panel__hint">No model runs yet. Submit a chat prompt first.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th>Runs</th>
-                  <th>Input Tokens</th>
-                  <th>Output Tokens</th>
-                  <th>Total Cost</th>
-                  <th>Avg Latency</th>
-                </tr>
-              </thead>
-              <tbody>
-                {modelUsage.map((row) => (
-                  <tr key={row.model}>
-                    <td>{row.model}</td>
-                    <td>{row.run_count}</td>
-                    <td>{row.total_input_tokens.toLocaleString()}</td>
-                    <td>{row.total_output_tokens.toLocaleString()}</td>
-                    <td>{formatCost(row.total_cost)}</td>
-                    <td>{row.average_latency_ms.toFixed(0)} ms</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {loading && !summary ? (
+        <div className="analytics-loading">
+          <div className="spinner" />
+          <p>Loading analytics…</p>
+        </div>
+      ) : summary ? (
+        <>
+          {/* KPI row — all values from GET /analytics/summary */}
+          <section className="analytics-kpis" aria-label="Summary metrics">
+            <div className="analytics-kpi">
+              <span className="analytics-kpi__label">Total Chats</span>
+              <span className="analytics-kpi__value">{summary.total_chats}</span>
+            </div>
+            <div className="analytics-kpi">
+              <span className="analytics-kpi__label">Actual Cost</span>
+              <span className="analytics-kpi__value">
+                {formatCost(summary.total_cost)}
+              </span>
+            </div>
+            <div className="analytics-kpi analytics-kpi--premium">
+              <span className="analytics-kpi__label">Premium Cost</span>
+              <span className="analytics-kpi__value">
+                {formatCost(summary.premium_baseline_cost)}
+              </span>
+            </div>
+            <div className="analytics-kpi analytics-kpi--savings">
+              <span className="analytics-kpi__label">Total Savings</span>
+              <span className="analytics-kpi__value analytics-kpi__value--green">
+                {formatCost(summary.total_savings)}
+              </span>
+            </div>
+            <div className="analytics-kpi analytics-kpi--savings">
+              <span className="analytics-kpi__label">Savings %</span>
+              <span className="analytics-kpi__value analytics-kpi__value--green">
+                {summary.savings_percentage.toFixed(1)}%
+              </span>
+            </div>
+          </section>
 
-      {/* Chat history table */}
-      <section className="panel">
-        <h3 className="panel__title">Chat History</h3>
-        {history.length === 0 ? (
-          <p className="panel__hint">No chat history yet.</p>
-        ) : (
-          <div className="history-list">
-            {history.map((row) => (
-              <div key={row.id} className="history-item">
-                <div className="history-item__meta">
-                  <span className="task-badge">{row.task_type}</span>
-                  <span className="history-item__model">{row.selected_model}</span>
-                  <span className="history-item__time">{formatDate(row.timestamp)}</span>
-                </div>
-                <p className="history-item__prompt">
-                  <strong>Prompt:</strong> {row.prompt}
-                </p>
-                <p className="history-item__response">
-                  <strong>Response:</strong>{" "}
-                  {row.response.length > 200
-                    ? `${row.response.slice(0, 200)}…`
-                    : row.response}
-                </p>
-                <div className="history-item__costs">
-                  <span>Actual: {formatCost(row.actual_cost)}</span>
-                  <span>Premium: {formatCost(row.premium_cost)}</span>
-                  <span className="cost-card__value--savings">
-                    Saved: {row.savings_percentage.toFixed(1)}%
-                  </span>
-                </div>
+          <div className="analytics-split">
+            {/* Model usage — GET /analytics/model-usage */}
+            <section className="analytics-panel panel">
+              <h3 className="analytics-panel__title">Model Usage Breakdown</h3>
+              <div className="analytics-panel__scroll">
+                {modelUsage.length === 0 ? (
+                  <p className="analytics-empty">
+                    No model runs yet. Send a chat to populate analytics.
+                  </p>
+                ) : (
+                  <table className="analytics-table">
+                    <thead>
+                      <tr>
+                        <th>Model</th>
+                        <th>Runs</th>
+                        <th>Share</th>
+                        <th>Cost</th>
+                        <th>Latency</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modelUsage.map((row) => {
+                        const share =
+                          totalRuns > 0
+                            ? ((row.run_count / totalRuns) * 100).toFixed(1)
+                            : "0.0";
+                        return (
+                          <tr key={row.model}>
+                            <td className="analytics-table__model">{row.model}</td>
+                            <td>{row.run_count}</td>
+                            <td>
+                              <div className="analytics-bar">
+                                <div
+                                  className="analytics-bar__fill"
+                                  style={{ width: `${share}%` }}
+                                />
+                                <span className="analytics-bar__label">{share}%</span>
+                              </div>
+                            </td>
+                            <td>{formatCost(row.total_cost)}</td>
+                            <td>{row.average_latency_ms.toFixed(0)} ms</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
-            ))}
+            </section>
+
+            {/* Recent conversations — GET /analytics/history */}
+            <section className="analytics-panel panel">
+              <h3 className="analytics-panel__title">Recent Conversations</h3>
+              <div className="analytics-panel__scroll">
+                {history.length === 0 ? (
+                  <p className="analytics-empty">No conversations recorded yet.</p>
+                ) : (
+                  <ul className="analytics-conversations">
+                    {history.map((row) => (
+                      <li key={row.id} className="analytics-conv">
+                        <div className="analytics-conv__top">
+                          <span className="task-badge">{row.task_type}</span>
+                          <span className="analytics-conv__model">
+                            {row.selected_model}
+                          </span>
+                          <time className="analytics-conv__time">
+                            {formatDate(row.timestamp)}
+                          </time>
+                        </div>
+                        <p className="analytics-conv__prompt">
+                          {truncate(row.prompt)}
+                        </p>
+                        <p className="analytics-conv__response">
+                          {truncate(row.response)}
+                        </p>
+                        <div className="analytics-conv__costs">
+                          <span>Actual {formatCost(row.actual_cost)}</span>
+                          <span>Premium {formatCost(row.premium_cost)}</span>
+                          <span className="analytics-conv__saved">
+                            Saved {row.savings_percentage.toFixed(1)}%
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
           </div>
-        )}
-      </section>
+        </>
+      ) : null}
     </div>
   );
 }

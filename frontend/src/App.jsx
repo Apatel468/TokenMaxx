@@ -45,7 +45,7 @@ function App() {
         </nav>
       </header>
 
-      <main className="app-main">
+      <main className="app-main main">
         {activeTab === "chat" ? (
           <ChatPage onChatComplete={handleChatComplete} />
         ) : (

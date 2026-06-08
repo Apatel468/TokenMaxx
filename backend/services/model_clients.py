@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 from services.context_builder import PromptContext
+from services.response_cleaner import clean_model_response
 
 # Load .env into environment variables once at import time
 load_dotenv()
@@ -27,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 # Only Groq is used in Phase 2
 GROQ_ENV_KEY = "GROQ_API_KEY"
+
+# Extra system instruction for Qwen models that may emit chain-of-thought tags
+_QWEN_MODEL_ID = "qwen/qwen3-32b"
+_QWEN_SYSTEM_SUFFIX = (
+    "Do not include internal reasoning, chain-of-thought, or <think> tags. "
+    "Only provide the final answer."
+)
 
 
 @dataclass
@@ -76,8 +84,29 @@ def _to_litellm_model(groq_model: str) -> str:
     return f"groq/{groq_model}"
 
 
+def _is_qwen_model(groq_model: str) -> bool:
+    """Return True when the routed model is Qwen (needs no-thinking system hint)."""
+    normalized = groq_model.lower().replace("groq/", "")
+    return "qwen" in normalized or normalized == _QWEN_MODEL_ID
+
+
+def _build_system_prompt(context: PromptContext, groq_model: str) -> str:
+    """
+    Combine the enhancer system prompt with model-specific instructions.
+
+    Qwen models get an extra line telling them not to emit thinking tags.
+    """
+    parts: list[str] = []
+    if context.system_prompt:
+        parts.append(context.system_prompt.strip())
+    if _is_qwen_model(groq_model):
+        parts.append(_QWEN_SYSTEM_SUFFIX)
+    return "\n\n".join(parts)
+
+
 def _build_litellm_messages(
     context: PromptContext,
+    groq_model: str,
     messages: list[dict] | None = None,
 ) -> list[dict]:
     """
@@ -91,10 +120,34 @@ def _build_litellm_messages(
     ]
 
     litellm_messages: list[dict] = []
-    if context.system_prompt:
-        litellm_messages.append({"role": "system", "content": context.system_prompt})
+    system_prompt = _build_system_prompt(context, groq_model)
+    if system_prompt:
+        litellm_messages.append({"role": "system", "content": system_prompt})
     litellm_messages.extend(history)
     return litellm_messages
+
+
+def _finalize_response(response: ModelResponse) -> ModelResponse:
+    """
+    Strip thinking tags from model text before API/DB storage.
+
+    Token counts are left as reported by the API (cost estimate unchanged).
+    """
+    cleaned = clean_model_response(response.text)
+    if cleaned != response.text:
+        logger.info(
+            "Response cleanup | removed thinking tags | %d -> %d chars",
+            len(response.text),
+            len(cleaned),
+        )
+    return ModelResponse(
+        text=cleaned,
+        estimated_output_tokens=response.estimated_output_tokens,
+        input_tokens=response.input_tokens,
+        is_mock=response.is_mock,
+        latency_ms=response.latency_ms,
+        litellm_model=response.litellm_model,
+    )
 
 
 def _call_groq(
@@ -110,26 +163,30 @@ def _call_groq(
     import litellm
 
     litellm_model = _to_litellm_model(groq_model)
-    litellm_messages = _build_litellm_messages(context, messages=messages)
+    litellm_messages = _build_litellm_messages(
+        context, groq_model, messages=messages
+    )
 
     start = time.perf_counter()
     response = litellm.completion(model=litellm_model, messages=litellm_messages)
     latency_ms = (time.perf_counter() - start) * 1000
 
-    text = response.choices[0].message.content or ""
+    raw_text = response.choices[0].message.content or ""
     usage = response.usage
     input_tokens = usage.prompt_tokens if usage else None
     output_tokens = (
-        usage.completion_tokens if usage else max(len(text) // 4, 1)
+        usage.completion_tokens if usage else max(len(raw_text) // 4, 1)
     )
 
-    return ModelResponse(
-        text=text,
-        estimated_output_tokens=output_tokens,
-        input_tokens=input_tokens,
-        is_mock=False,
-        latency_ms=round(latency_ms, 1),
-        litellm_model=litellm_model,
+    return _finalize_response(
+        ModelResponse(
+            text=raw_text,
+            estimated_output_tokens=output_tokens,
+            input_tokens=input_tokens,
+            is_mock=False,
+            latency_ms=round(latency_ms, 1),
+            litellm_model=litellm_model,
+        )
     )
 
 
@@ -148,13 +205,15 @@ def _generate_mock_response(groq_model: str, context: PromptContext) -> ModelRes
     output_tokens = max(len(text) // 4, 1)
     latency_ms = (time.perf_counter() - start) * 1000
 
-    return ModelResponse(
-        text=text,
-        estimated_output_tokens=output_tokens,
-        input_tokens=None,
-        is_mock=True,
-        latency_ms=round(latency_ms, 1),
-        litellm_model="mock",
+    return _finalize_response(
+        ModelResponse(
+            text=text,
+            estimated_output_tokens=output_tokens,
+            input_tokens=None,
+            is_mock=True,
+            latency_ms=round(latency_ms, 1),
+            litellm_model="mock",
+        )
     )
 
 

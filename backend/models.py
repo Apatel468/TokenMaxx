@@ -35,6 +35,10 @@ class ChatResponse(BaseModel):
     """What the server returns after routing and generating a response."""
 
     conversation_id: int
+    title: str = Field(
+        default="",
+        description="Conversation title (set after the first assistant reply).",
+    )
     original_prompt: str
     enhanced_prompt: str = Field(
         description="Task-wrapped prompt sent to the LLM (user intent preserved)."
@@ -165,6 +169,7 @@ class ConversationListItem(BaseModel):
     """Summary row for GET /conversations."""
 
     id: int
+    title: str = ""
     preview: str
     message_count: int
     created_at: datetime
@@ -178,6 +183,7 @@ class ConversationDetail(BaseModel):
     """Full thread for GET /conversations/{id}."""
 
     id: int
+    title: str = ""
     messages: list[MessageOut]
     created_at: datetime
     updated_at: datetime

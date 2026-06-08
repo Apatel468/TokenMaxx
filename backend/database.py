@@ -62,6 +62,8 @@ class Conversation(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    # Title from first user + assistant exchange (generated once after first reply)
+    title = Column(String(200), nullable=True)
 
     messages = relationship("Message", back_populates="conversation")
     model_runs = relationship("ModelRun", back_populates="conversation")
@@ -165,6 +167,7 @@ def init_db() -> None:
     """Create all tables if they don't exist yet. Called on app startup."""
     Base.metadata.create_all(bind=engine)
     _migrate_model_runs_columns()
+    _migrate_conversations_columns()
 
 
 def _migrate_model_runs_columns() -> None:
@@ -191,6 +194,25 @@ def _migrate_model_runs_columns() -> None:
             except OperationalError:
                 # Column already exists — safe to ignore
                 conn.rollback()
+
+
+def _table_has_column(conn, table: str, column: str) -> bool:
+    rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    return any(row[1] == column for row in rows)
+
+
+def _migrate_conversations_columns() -> None:
+    """Add title column to conversations for existing SQLite databases."""
+    with engine.connect() as conn:
+        if _table_has_column(conn, "conversations", "title"):
+            return
+        try:
+            conn.execute(
+                text("ALTER TABLE conversations ADD COLUMN title VARCHAR(200)")
+            )
+            conn.commit()
+        except OperationalError:
+            conn.rollback()
 
 
 def get_db():

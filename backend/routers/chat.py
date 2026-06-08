@@ -68,7 +68,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     log_request_metrics(decision.model_id, context.task_type, model_response, costs)
 
     # Step 7: Persist original user text + enhancement metadata + model_run
-    conversation_id = save_chat_turn(
+    conversation_id, title = save_chat_turn(
         db=db,
         prompt=request.prompt,
         response_text=model_response.text,
@@ -84,6 +84,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     return ChatResponse(
         conversation_id=conversation_id,
+        title=title or "",
         original_prompt=request.prompt,
         enhanced_prompt=context.enhanced_prompt,
         system_prompt=context.system_prompt,
