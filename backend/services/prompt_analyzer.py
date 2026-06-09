@@ -27,6 +27,8 @@ class AnalysisResult:
     task_type: str
     confidence: float  # 0.0 to 1.0 — how sure we are about the classification
     keywords_matched: list[str]
+    difficulty: str = "medium"  # easy | medium | hard (used by prompt_enhancer)
+    risk_level: str = "low"  # low | medium | high (used by prompt_enhancer)
 
 
 # Keyword rules: each task type maps to words/phrases we look for

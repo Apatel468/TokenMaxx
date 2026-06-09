@@ -1,76 +1,51 @@
 # SmartLLM Router — Roadmap
 
 > Milestones, current focus, and path to production.  
-> **Version:** 0.2.1 · **Last updated:** June 2026
+> **Version:** 0.2.2 · **Last updated:** June 2026
 
 ---
 
 ## Completed Milestones
 
-### M1 — MVP Backend (Phase 1)
-- [x] FastAPI skeleton, keyword classifier, mock responses, cost tracking
-
-### M2 — Frontend MVP
-- [x] React + Vite, Chat UI, Analytics tab, dark styling
-
-### M3 — LiteLLM + Groq (Phase 2)
-- [x] Groq-only pivot, `.env` key, mock fallback, request logging
-
-### M4 — Config-Driven Routing
-- [x] `models.yaml`, aliases, pricing, `GET /models`
-
-### M5 — Analytics (Phase 3)
-- [x] SQLite schema, analytics endpoints, dashboard
-
-### M6 — Conversation Memory (Phase 3A)
-- [x] Multi-turn `conversation_id`, sidebar UI, full history to Groq
-
-### M7 — Project Documentation
-- [x] `docs/` folder with memory, architecture, roadmap, decisions
+### M1–M7
+- [x] MVP backend, frontend, Groq/LiteLLM, YAML routing, analytics, multi-turn memory, docs
 
 ### M8 — LLM Classifier (Phase 3B)
-- [x] Design: Groq `llama-3.1-8b-instant` classifier via LiteLLM
-- [x] JSON output: task_type, difficulty, risk_level, reason
-- [x] Keyword fallback when Groq unavailable
-- [ ] **Restore in code:** `prompt_analyzer.py` currently keyword-only (regression)
+- [x] Design + `models.yaml` classifier block
+- [x] Keyword fallback
+- [ ] **Optional:** Restore Groq classifier in `prompt_analyzer.py` (keyword + defaults work today)
 
 ### M9 — Prompt Engineering (Phase 4)
-- [x] `prompt_enhancer.py` — AI Prompt Engineering Agent
-- [x] Groq `llama-3.1-8b-instant` for enhancement (LiteLLM)
-- [x] Rule-based fallback on failure
-- [x] `enhancement_method`: `"ai"` | `"rule_fallback"` in API
-- [x] Store `enhanced_prompt`, `system_prompt`, `enhancement_reason` in `model_runs`
-- [x] `POST /chat` returns enhancement metadata
-- [x] System prompt prepended in `model_clients`
-- [x] Analytics history per `model_run` with `enhanced_prompt`
+- [x] AI prompt engineering agent + rule fallback
+- [x] Enhancement metadata in API and `model_runs`
 
 ### M10 — GitHub
-- [x] Repository: https://github.com/Apatel468/smartllm-router
-- [x] Initial commit + Phase 3B/4 push
+- [x] https://github.com/Apatel468/smartllm-router
 
-### M11 — Stabilization & UX (in progress)
-- [x] Conversation titles after first reply (user + assistant, 3–8 words)
-- [x] `conversations.title` column + migration
+### M11 — Stabilization & UX
+- [x] Conversation titles (after first reply, user + assistant)
+- [x] Response cleanup (Qwen thinking tags)
+- [x] 100vh 3-column chat UI + analytics polish
 - [x] `POST /chat` returns `title`
-- [x] Response cleanup (`response_cleaner.py` — Qwen thinking tags)
-- [x] 100vh chat layout, 3-column UI, internal scroll
-- [x] Analytics dashboard polish (KPIs, model usage, recent conversations)
-- [ ] Fix `prompt_analyzer` — restore LLM classifier or add `difficulty`/`risk_level` defaults
+- [x] Keyword analyzer defaults (`difficulty`, `risk_level`)
+- [x] Groq YAML routing restored in `router_engine.py`
+- [x] `cost_tracker` YAML pricing + `log_request_metrics`
+- [x] CORS for ports 5173 and 5174
 - [ ] Frontend: show enhancement fields in Chat UI
-- [ ] Context window truncation for long threads
+- [ ] Context window truncation
 - [ ] `VITE_API_BASE` env for frontend
 - [ ] Update `main.py` docstring (port 8001)
-- [ ] Remove/migrate legacy `chat_history`
-- [ ] Basic pytest suite
+- [ ] pytest suite
 - [ ] Store `enhancement_method` in SQLite
+- [ ] Commit + push latest pipeline fixes to GitHub
 
 ---
 
 ## Current Milestone
 
-**M11 — Stabilization & UX** (see checklist above)
+**M11 — Stabilization & UX**
 
-**Immediate priority:** Fix classifier / `AnalysisResult` so `POST /chat` pipeline is consistent with `context_builder`.
+App is runnable end-to-end. Remaining M11 items are UX, tests, and polish.
 
 ---
 
@@ -80,74 +55,46 @@
 
 | Task | Description |
 |------|-------------|
-| SSE streaming from `/chat` | Stream Groq tokens to frontend |
-| Rename `mock_response` → `response` | Breaking API cleanup |
-| Typing indicator | Better UX during multi-step Groq pipeline |
-| Mobile-responsive chat layout | Sidebar collapse |
-| Title regeneration tool | Optional admin endpoint to clear stale titles |
+| SSE streaming | Stream Groq tokens to frontend |
+| Rename `mock_response` → `response` | API cleanup |
+| LLM classifier restore | Optional Groq classify step |
+| Title regeneration endpoint | Clear stale titles |
+| Mobile layout | Collapsible sidebar |
 
 ---
 
 ## Future Phases
 
-### Phase 5 — Quality & Intelligence
-- Restore and tune LLM classifier permanently
-- Quality scoring per model per task type
-- A/B routing experiments
-- User feedback (thumbs up/down)
-- Move enhancer + title models to `models.yaml`
-
-### Phase 6 — Multi-Provider
-- Re-add OpenAI, Anthropic, Gemini via LiteLLM
-- Provider health checks and failover
-
-### Phase 7 — Platform
-- Auth, budget limits, rate limiting, admin dashboard
-
-### Phase 8 — Production
-- Docker Compose, CI/CD, Alembic, monitoring, HTTPS
+- **Phase 5** — Quality scoring, A/B routing, move enhancer/title models to YAML
+- **Phase 6** — Multi-provider (OpenAI, Anthropic, Gemini)
+- **Phase 7** — Auth, rate limits, budgets
+- **Phase 8** — Docker, CI/CD, Alembic, production deploy
 
 ---
 
-## Production Readiness Checklist
+## Production Readiness
 
-### Security
-- [ ] Auth on mutating endpoints
-- [ ] Rate limiting
-- [ ] `.env` in secrets manager (prod)
-- [ ] CORS restricted to production domain
-- [ ] Max prompt length enforced
+**Current score:** ~40% production ready
 
-### Reliability
-- [ ] Automated tests
-- [ ] Health check includes DB
-- [ ] Context truncation
-- [ ] Database backups
-- [ ] Classifier/enhancer pipeline regression tests
-
-### Operations
-- [ ] Alembic migrations (replace manual ALTER)
-- [ ] Logging aggregation
-- [ ] Runbook
-
-### Documentation
-- [x] Architecture docs (updated v0.2.1)
-- [x] Handoff prompt
-- [ ] API changelog
-- [ ] Deployment guide
-
-**Current score:** ~35% production ready
+| Area | Status |
+|------|--------|
+| Core pipeline | ✅ Works locally |
+| Documentation | ✅ Updated v0.2.2 |
+| Tests | ❌ None |
+| Auth / rate limits | ❌ None |
+| Alembic | ❌ Manual ALTER only |
+| Deployment guide | ❌ Not written |
 
 ---
 
 ## Version History
 
-| Version | Milestone | Summary |
-|---------|-----------|---------|
-| 0.1.0 | M1–M6 | MVP: Groq routing, analytics, multi-turn |
-| 0.2.0 | M8–M9 | LLM classifier + AI prompt engineering agent |
-| 0.2.1 | M11 (partial) | Conversation titles, UI polish, response cleanup |
-| 0.3.0 | M11–M12 (planned) | Classifier fix, enhancement UI, truncation, tests, streaming |
-| 1.0.0 | Phase 8 (planned) | Production-ready |
+| Version | Summary |
+|---------|---------|
+| 0.1.0 | MVP: Groq routing, analytics, multi-turn |
+| 0.2.0 | LLM classifier design + AI prompt engineering |
+| 0.2.1 | Conversation titles, UI polish, response cleanup |
+| 0.2.2 | Pipeline fixes (router, cost_tracker, CORS, analyzer defaults) |
+| 0.3.0 | Planned: enhancement UI, tests, streaming |
 
 ---
