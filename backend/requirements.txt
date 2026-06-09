@@ -1,4 +1,4 @@
-# SmartLLM Router - Python dependencies
+# TokenMaxx - Python dependencies
 # Install with: pip install -r requirements.txt
 
 fastapi>=0.109.0

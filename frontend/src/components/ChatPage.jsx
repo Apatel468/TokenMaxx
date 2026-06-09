@@ -230,7 +230,7 @@ function ChatPage({ onChatComplete }) {
 
             {conversations.length === 0 && (
 
-              <p className="panel__hint">No conversations yet.</p>
+              <p className="panel__hint">No conversations yet. Start your first TokenMaxx chat.</p>
 
             )}
 
@@ -285,11 +285,8 @@ function ChatPage({ onChatComplete }) {
             {messages.length === 0 && !loading && (
 
               <p className="panel__hint">
-
-                Send a message to start. Follow-ups in the same conversation include
-
-                prior context automatically.
-
+                Welcome to TokenMaxx. Send a message to route intelligently and minimize cost.
+                Follow-ups in the same conversation include prior context automatically.
               </p>
 
             )}
@@ -388,7 +385,7 @@ function ChatPage({ onChatComplete }) {
 
               <div className="empty-state empty-state--compact">
 
-                <p>Send a message to see model routing and cost savings.</p>
+                <p>Send a message to see TokenMaxx model routing and cost savings.</p>
 
               </div>
 

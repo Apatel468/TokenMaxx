@@ -1,5 +1,6 @@
-# SmartLLM Router — Project Memory
+# TokenMaxx — Project Memory
 
+> **Tagline:** Maximum Intelligence, Minimum Cost  
 > **Permanent project context.** This file is the single source of truth when chat history is unavailable.  
 > **Version:** 0.2.2 · **Last audited:** June 2026  
 > **GitHub:** https://github.com/Apatel468/smartllm-router
@@ -8,15 +9,15 @@
 
 ## Project Vision
 
-**SmartLLM Router** is a demo/MVP web application that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves the concept of **task-aware model selection**, **prompt engineering**, and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
+**TokenMaxx** — *Maximum Intelligence, Minimum Cost* — is an enterprise-style demo/MVP that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves **task-aware model selection**, **prompt engineering**, and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
 
-The product narrative: *"Don't pay premium prices for simple tasks — classify the request, engineer the prompt, route to the right Groq model, and show how much you saved."*
+The product narrative: *"Maximum Intelligence, Minimum Cost — classify the request, engineer the prompt, route to the right Groq model, and show how much you saved."*
 
 ---
 
 ## Business Problem Being Solved
 
-Organizations and developers often default to one expensive LLM (e.g. GPT-4o) for every request. Many tasks — flashcards, simple Q&A, summarization — do not need premium reasoning. SmartLLM Router:
+Organizations and developers often default to one expensive LLM (e.g. GPT-4o) for every request. Many tasks — flashcards, simple Q&A, summarization — do not need premium reasoning. TokenMaxx:
 
 1. **Classifies** what kind of task the user is asking for (keyword rules; LLM classifier optional upgrade)
 2. **Enhances** the prompt with task-specific structure (AI agent or rule fallback)
@@ -107,6 +108,12 @@ smartllm-router/
 │   ├── api/ (chat, conversations, analytics, config.js)
 │   └── utils/conversationTitle.js
 └── docs/
+    ├── project_memory.md
+    ├── architecture.md
+    ├── system_design.md
+    ├── demo_script.md
+    ├── roadmap.md
+    └── decisions.md
 ```
 
 ---
@@ -306,9 +313,9 @@ Send the GitHub repo or a zip. **Do not** include `backend/.env`, `venv/`, or `n
 # CURSOR HANDOFF PROMPT
 
 ```
-You are continuing development on SmartLLM Router.
+You are continuing development on TokenMaxx — Maximum Intelligence, Minimum Cost.
 
-READ FIRST: docs/project_memory.md, architecture.md, decisions.md, roadmap.md
+READ FIRST: docs/project_memory.md, architecture.md, system_design.md, decisions.md, roadmap.md
 GITHUB: https://github.com/Apatel468/smartllm-router
 
 RUN:

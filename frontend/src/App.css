@@ -25,20 +25,37 @@
 }
 
 .header__logo {
-  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent) 0%, #0ea5e9 100%);
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.25);
+}
+
+.header__logo-mark {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #fff;
   line-height: 1;
 }
 
 .header__title {
-  font-size: 1.35rem;
+  font-size: 1.4rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  color: var(--text);
 }
 
 .header__subtitle {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  margin-top: 0.15rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--accent-hover);
+  margin-top: 0.2rem;
+  letter-spacing: 0.01em;
 }
 
 .header__badge {
@@ -993,5 +1010,35 @@
 .loading-state--inline .spinner {
   width: 24px;
   height: 24px;
+}
+
+/* ---- App footer ---- */
+.app-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1.5rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.app-footer__brand {
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.app-footer__tagline {
+  color: var(--text-muted);
+}
+
+.app-footer__tagline::before {
+  content: "·";
+  margin-right: 0.75rem;
+  color: var(--border);
 }
 

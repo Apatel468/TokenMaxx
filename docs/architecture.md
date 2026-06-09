@@ -1,5 +1,6 @@
-# SmartLLM Router — Architecture
+# TokenMaxx — Architecture
 
+> **Tagline:** Maximum Intelligence, Minimum Cost  
 > Technical architecture reference. Pair with `project_memory.md` for context.  
 > **Version:** 0.2.2 · **Last updated:** June 2026
 

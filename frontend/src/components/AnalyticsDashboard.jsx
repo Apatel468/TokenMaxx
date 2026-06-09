@@ -65,9 +65,9 @@ function AnalyticsDashboard({ onRefresh }) {
     <div className="analytics-page">
       <header className="analytics-header">
         <div>
-          <h2 className="analytics-header__title">Analytics</h2>
+          <h2 className="analytics-header__title">TokenMaxx Analytics</h2>
           <p className="analytics-header__subtitle">
-            Live usage and savings from stored chat requests
+            Maximum Intelligence, Minimum Cost — live usage and savings
           </p>
         </div>
         <button
@@ -178,7 +178,9 @@ function AnalyticsDashboard({ onRefresh }) {
               <h3 className="analytics-panel__title">Recent Conversations</h3>
               <div className="analytics-panel__scroll">
                 {history.length === 0 ? (
-                  <p className="analytics-empty">No conversations recorded yet.</p>
+                  <p className="analytics-empty">
+                    No conversations recorded yet. Start a chat in TokenMaxx to see analytics here.
+                  </p>
                 ) : (
                   <ul className="analytics-conversations">
                     {history.map((row) => (

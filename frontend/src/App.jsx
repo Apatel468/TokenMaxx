@@ -8,7 +8,6 @@ import "./App.css";
 
 function App() {
   const [activeTab, setActiveTab] = useState("chat");
-  // Bump this after a chat submit so Analytics refreshes when user switches tabs
   const [analyticsRefresh, setAnalyticsRefresh] = useState(0);
 
   function handleChatComplete() {
@@ -19,11 +18,13 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header__brand">
-          <span className="header__logo">⚡</span>
+          <div className="header__logo" aria-hidden="true">
+            <span className="header__logo-mark">T</span>
+          </div>
           <div>
-            <h1 className="header__title">SmartLLM Router</h1>
+            <h1 className="header__title">TokenMaxx</h1>
             <p className="header__subtitle">
-              Routes prompts to the best Groq model and tracks savings
+              Maximum Intelligence, Minimum Cost
             </p>
           </div>
         </div>
@@ -52,6 +53,11 @@ function App() {
           <AnalyticsDashboard onRefresh={analyticsRefresh} />
         )}
       </main>
+
+      <footer className="app-footer">
+        <span className="app-footer__brand">TokenMaxx</span>
+        <span className="app-footer__tagline">Maximum Intelligence, Minimum Cost</span>
+      </footer>
     </div>
   );
 }

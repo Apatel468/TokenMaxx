@@ -9,20 +9,20 @@
 }
 
 :root {
-  /* Color palette */
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-light: #334155;
-  --border: #475569;
-  --text: #f1f5f9;
-  --text-muted: #94a3b8;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --success: #22c55e;
+  /* TokenMaxx enterprise palette */
+  --bg: #0b1220;
+  --surface: #141c2b;
+  --surface-light: #1e2a3d;
+  --border: #2d3a4f;
+  --text: #f0f4f8;
+  --text-muted: #8b9cb3;
+  --accent: #2563eb;
+  --accent-hover: #60a5fa;
+  --success: #10b981;
   --error: #ef4444;
   --premium: #f59e0b;
-  --radius: 12px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --radius: 10px;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
 body {

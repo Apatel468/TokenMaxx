@@ -1,14 +1,14 @@
 """
-SmartLLM Router — FastAPI application entry point.
+TokenMaxx — FastAPI application entry point.
 
 Run the server:
     cd backend
     pip install -r requirements.txt
-    uvicorn main:app --reload
+    uvicorn main:app --reload --port 8001
 
 Then open:
-    http://127.0.0.1:8000/docs   ← interactive API docs (Swagger UI)
-    http://127.0.0.1:8000/health ← health check
+    http://127.0.0.1:8001/docs   ← interactive API docs (Swagger UI)
+    http://127.0.0.1:8001/health ← health check
 """
 
 from contextlib import asynccontextmanager
@@ -31,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
 from routers import analytics, chat, conversations, models
 
+TAGLINE = "Maximum Intelligence, Minimum Cost"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,12 +46,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="SmartLLM Router",
+    title="TokenMaxx API",
     description=(
-        "Routes user prompts to the best AI model based on task type, "
+        f"{TAGLINE}. Routes user prompts to the best AI model based on task type, "
         "cost, and quality — and tracks savings vs. always using premium."
     ),
-    version="0.1.0",
+    version="0.2.2",
     lifespan=lifespan,
 )
 
@@ -84,6 +86,7 @@ def health_check():
     """
     return {
         "status": "ok",
-        "service": "SmartLLM Router",
-        "version": "0.1.0",
+        "service": "TokenMaxx",
+        "tagline": TAGLINE,
+        "version": "0.2.2",
     }

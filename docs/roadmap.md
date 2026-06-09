@@ -1,5 +1,6 @@
-# SmartLLM Router — Roadmap
+# TokenMaxx — Roadmap
 
+> **Tagline:** Maximum Intelligence, Minimum Cost  
 > Milestones, current focus, and path to production.  
 > **Version:** 0.2.2 · **Last updated:** June 2026
 

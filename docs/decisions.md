@@ -1,5 +1,6 @@
-# SmartLLM Router — Architectural Decisions
+# TokenMaxx — Architectural Decisions
 
+> **Tagline:** Maximum Intelligence, Minimum Cost  
 > Record of major decisions, tradeoffs, and rules for future developers.  
 > **Version:** 0.2.2 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
