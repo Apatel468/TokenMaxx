@@ -7,7 +7,9 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 ## Features
 
 - **Dynamic routing** — scores all Groq models via `model_registry.py` + composite formula
-- **Model Controls** — enable/disable models; intelligent fallback when preferred is off
+- **Model Controls** — admins set org-wide toggles; users set personal preferences; intelligent fallback when preferred model is off
+- **Authentication** — JWT signup/login; per-user conversations and analytics
+- **Admin dashboard** — employee usage metrics and cost breakdown (admin role)
 - AI prompt engineering with rule-based fallback
 - Multi-turn conversations with auto-generated titles
 - Real-time analytics: cost, savings, model usage, and routing scores
@@ -28,7 +30,7 @@ python -m venv venv
 venv\Scripts\activate          # Windows
 # source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
-copy .env.example .env         # add GROQ_API_KEY
+copy .env.example .env         # add GROQ_API_KEY, JWT_SECRET
 uvicorn main:app --reload --port 8001
 ```
 
@@ -48,9 +50,11 @@ npm run dev
 | API docs | http://127.0.0.1:8001/docs |
 | Health | http://127.0.0.1:8001/health |
 
+Sign up or log in at the app. Optional: set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` to seed an admin account on startup.
+
 ## Repository
 
-https://github.com/Apatel468/smartllm-router
+https://github.com/Apatel468/TokenMaxx
 
 ## Documentation
 
