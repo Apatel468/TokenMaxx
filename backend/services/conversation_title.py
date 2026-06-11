@@ -14,12 +14,13 @@ import re
 
 from dotenv import load_dotenv
 
+from services.config_loader import get_auxiliary_model
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 GROQ_ENV_KEY = "GROQ_API_KEY"
-TITLE_MODEL = "llama-3.1-8b-instant"
 MIN_WORDS = 3
 MAX_WORDS = 8
 MAX_PROMPT_CHARS = 800
@@ -181,7 +182,7 @@ Creates study flashcards.
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": _format_turn_context(user_message, assistant_response)},
     ]
-    litellm_model = _to_litellm_model(TITLE_MODEL)
+    litellm_model = _to_litellm_model(get_auxiliary_model("title"))
 
     try:
         response = litellm.completion(

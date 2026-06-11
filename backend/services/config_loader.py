@@ -1,95 +1,77 @@
-"""
-Config Loader — reads routing rules from config/models.yaml.
-
-The YAML file defines which Groq model to use for each task type.
-Change models.yaml to update routing without editing Python code.
-"""
-
-from pathlib import Path
-
-import yaml
-
-# Path to models.yaml (backend/config/models.yaml)
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
-
-# Cached config so we only read the file once per server run
-_config_cache: dict | None = None
-
-# Map analyzer task types that aren't in YAML to a YAML key
-_TASK_ALIASES: dict[str, str] = {
-    "summarization": "report",
-    "creative_writing": "report",
-    "data_analysis": "report",
-    "translation": "general_qa",
-}
-
-
-def load_models_config() -> dict:
-    """Load and cache config/models.yaml."""
-    global _config_cache
-    if _config_cache is None:
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
-            _config_cache = yaml.safe_load(f)
-    return _config_cache
-
-
-def get_route_for_task(task_type: str) -> dict:
-    """
-    Return the routing entry for a task type.
-
-    Looks up task_type in models.yaml. If not found, uses aliases
-    (e.g. summarization → report) or falls back to default_task.
-    """
-    config = load_models_config()
-    models = config["models"]
-
-    # Direct match in YAML
-    if task_type in models:
-        return models[task_type]
-
-    # Try alias (e.g. summarization → report)
-    alias = _TASK_ALIASES.get(task_type)
-    if alias and alias in models:
-        return models[alias]
-
-    # Fall back to default_task from YAML
-    default_key = config.get("default_task", "general_qa")
-    return models[default_key]
-
-
-def get_pricing() -> dict:
-    """Return Groq model pricing block from YAML."""
-    return load_models_config().get("pricing", {})
-
-
-def get_premium_baseline() -> dict:
-    """Return premium baseline used for savings % calculation."""
-    return load_models_config().get("premium_baseline", {})
-
-
-def get_allowed_task_types() -> list[str]:
-    """
-    Return task type keys the LLM classifier is allowed to choose.
-
-    These are the top-level keys under "models" in models.yaml.
-    """
-    config = load_models_config()
-    return list(config["models"].keys())
-
-
-def get_default_task_type() -> str:
-    """Return the fallback task type when classification is uncertain."""
-    return load_models_config().get("default_task", "general_qa")
-
-
-def get_classifier_config() -> dict:
-    """
-    Return the Groq model used for LLM-based prompt classification.
-
-    Falls back to general_qa's model if "classifier" is missing from YAML.
-    """
-    config = load_models_config()
-    if "classifier" in config:
-        return config["classifier"]
-    default_key = config.get("default_task", "general_qa")
-    return config["models"][default_key]
+"""
+Config Loader — reads routing config from config/models.yaml.
+
+Task profiles and auxiliary model ids live here.
+Per-model pricing and capability scores live in config/model_registry.py.
+"""
+
+from pathlib import Path
+
+import yaml
+
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
+_config_cache: dict | None = None
+
+
+def load_models_config() -> dict:
+    """Load and cache config/models.yaml."""
+    global _config_cache
+    if _config_cache is None:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            _config_cache = yaml.safe_load(f)
+    return _config_cache
+
+
+def resolve_task_key(task_type: str) -> str:
+    """Map analyzer task_type to a task_profiles key in models.yaml."""
+    config = load_models_config()
+    profiles = config.get("task_profiles", {})
+    if task_type in profiles:
+        return task_type
+    aliases = config.get("task_aliases", {})
+    alias = aliases.get(task_type)
+    if alias and alias in profiles:
+        return alias
+    return config.get("default_task", "general_qa")
+
+
+def get_task_profile(task_type: str) -> dict:
+    """Return the task profile dict (description + task_match_weights)."""
+    config = load_models_config()
+    key = resolve_task_key(task_type)
+    profiles = config.get("task_profiles", {})
+    return profiles.get(key, profiles.get(config.get("default_task", "general_qa"), {}))
+
+
+def get_auxiliary_model(role: str) -> str:
+    """
+    Return a small Groq model id for non-routing calls.
+
+    role: classifier | enhancer | title
+    """
+    config = load_models_config()
+    auxiliary = config.get("auxiliary", {})
+    return auxiliary.get(role, "llama-3.1-8b-instant")
+
+
+def get_premium_baseline() -> dict:
+    """Return premium baseline used for savings % calculation."""
+    return load_models_config().get("premium_baseline", {})
+
+
+def get_allowed_task_types() -> list[str]:
+    """Task type keys the classifier may choose (task_profiles keys)."""
+    config = load_models_config()
+    return list(config.get("task_profiles", {}).keys())
+
+
+def get_default_task_type() -> str:
+    """Fallback task type when classification is uncertain."""
+    return load_models_config().get("default_task", "general_qa")
+
+
+def get_classifier_config() -> dict:
+    """Groq model used for LLM-based prompt classification."""
+    model_id = get_auxiliary_model("classifier")
+    return {"provider": "groq", "model": model_id}
+

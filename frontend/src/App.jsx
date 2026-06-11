@@ -4,6 +4,7 @@
 import { useState } from "react";
 import AnalyticsDashboard from "./components/AnalyticsDashboard.jsx";
 import ChatPage from "./components/ChatPage.jsx";
+import ModelControls from "./components/ModelControls.jsx";
 import "./App.css";
 
 function App() {
@@ -43,15 +44,24 @@ function App() {
           >
             Analytics
           </button>
+          <button
+            type="button"
+            className={`nav-tabs__btn ${activeTab === "settings" ? "nav-tabs__btn--active" : ""}`}
+            onClick={() => setActiveTab("settings")}
+          >
+            Model Controls
+          </button>
         </nav>
       </header>
 
       <main className="app-main main">
-        {activeTab === "chat" ? (
+        {activeTab === "chat" && (
           <ChatPage onChatComplete={handleChatComplete} />
-        ) : (
+        )}
+        {activeTab === "analytics" && (
           <AnalyticsDashboard onRefresh={analyticsRefresh} />
         )}
+        {activeTab === "settings" && <ModelControls />}
       </main>
 
       <footer className="app-footer">

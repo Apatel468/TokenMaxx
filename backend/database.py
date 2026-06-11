@@ -93,6 +93,26 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
 
 
+class ModelSetting(Base):
+    """
+    User preference for whether a routable Groq model is enabled.
+
+    One row per unique model id from models.yaml. Disabled models are
+    skipped by the router (with fallback to the next enabled option).
+    """
+
+    __tablename__ = "model_settings"
+
+    model_id = Column(String(100), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class ModelRun(Base):
     """
     Routing decision and cost metrics for one AI reply.
@@ -168,6 +188,18 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_model_runs_columns()
     _migrate_conversations_columns()
+    _seed_model_settings()
+
+
+def _seed_model_settings() -> None:
+    """Insert default enabled rows for every routable model."""
+    from services.model_settings import seed_model_settings
+
+    db = SessionLocal()
+    try:
+        seed_model_settings(db)
+    finally:
+        db.close()
 
 
 def _migrate_model_runs_columns() -> None:

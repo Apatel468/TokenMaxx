@@ -1,57 +1,62 @@
-# Model routing config — read by services/config_loader.py
+# TokenMaxx routing config — read by services/config_loader.py
 #
-# Each task type maps to a Groq model. Edit this file to change routing
-# without touching Python code.
+# Model selection is DYNAMIC: the router scores ALL routable Groq models
+# using metadata in config/model_registry.py (not hardcoded per task).
 #
-# The LLM classifier (prompt_analyzer.py) may ONLY pick task types listed
-# under "models" below. Add a new key here to make it routable.
+# This file defines:
+#   - task_profiles: how to weight capability scores per task type
+#   - auxiliary: lightweight models for enhancer / title / classifier
+#   - premium_baseline: savings comparison reference
+#
+# To add a new Groq chat model: edit model_registry.py only.
 
-# Fast Groq model used only for prompt classification (not chat replies)
-classifier:
-  provider: groq
-  model: llama-3.1-8b-instant
+# Task types the prompt analyzer may assign (keys must match task_profiles)
+default_task: general_qa
 
-models:
+task_profiles:
   flashcards:
-    provider: groq
-    model: llama-3.3-70b-versatile
-    reason: Simple educational task — low-cost Groq model is enough.
+    description: Simple educational content — favor writing quality.
+    task_match_weights:
+      coding: 0.10
+      reasoning: 0.25
+      writing: 0.65
 
   coding:
-    provider: groq
-    model: qwen/qwen3-32b
-    reason: Strong coding/reasoning model available through Groq.
+    description: Programming, debugging, and technical tasks.
+    task_match_weights:
+      coding: 0.70
+      reasoning: 0.20
+      writing: 0.10
 
   general_qa:
-    provider: groq
-    model: llama-3.1-8b-instant
-    reason: Fast and cheap for simple questions.
+    description: Everyday questions and short answers.
+    task_match_weights:
+      coding: 0.15
+      reasoning: 0.40
+      writing: 0.45
 
   report:
-    provider: groq
-    model: llama-3.3-70b-versatile
-    reason: Higher-quality writing task.
+    description: Reports, summaries, and long-form writing.
+    task_match_weights:
+      coding: 0.10
+      reasoning: 0.30
+      writing: 0.60
 
-# Default route when task type is not listed above
-default_task: general_qa
+# Map analyzer outputs not listed above to a task profile key
+task_aliases:
+  summarization: report
+  creative_writing: report
+  data_analysis: report
+  translation: general_qa
+
+# Small/fast models for non-routing Groq calls (not scored by the router)
+auxiliary:
+  classifier: llama-3.1-8b-instant
+  enhancer: llama-3.1-8b-instant
+  title: llama-3.1-8b-instant
 
 # Premium baseline for savings comparison (not used for routing)
 premium_baseline:
   label: GPT-4o (Premium)
   input_per_1k: 0.005
   output_per_1k: 0.015
-
-# Groq pricing per 1,000 tokens (USD) — illustrative public rates
-pricing:
-  llama-3.3-70b-versatile:
-    input: 0.00059
-    output: 0.00079
-    label: Groq Llama 3.3 70B
-  qwen/qwen3-32b:
-    input: 0.00029
-    output: 0.00059
-    label: Groq Qwen3 32B
-  llama-3.1-8b-instant:
-    input: 0.00005
-    output: 0.00008
-    label: Groq Llama 3.1 8B Instant

@@ -29,7 +29,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import analytics, chat, conversations, models
+from routers import analytics, chat, conversations, models, settings
+from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
     We create SQLite tables here so they're ready before the first request.
     """
     init_db()
+    sync_groq_catalog(force=True)
     yield
 
 
@@ -74,6 +76,7 @@ app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(models.router)
 app.include_router(analytics.router)
+app.include_router(settings.router)
 
 
 @app.get("/health")

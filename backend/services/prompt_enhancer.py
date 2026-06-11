@@ -15,13 +15,13 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from services.config_loader import get_auxiliary_model
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 GROQ_ENV_KEY = "GROQ_API_KEY"
-# Cheap, fast Groq model dedicated to prompt engineering (not chat responses)
-ENHANCER_MODEL = "llama-3.1-8b-instant"
 
 # ---------------------------------------------------------------------------
 # Rule-based fallback (used when AI enhancement fails)
@@ -261,7 +261,7 @@ def _enhance_with_ai(
     """
     import litellm
 
-    litellm_model = _to_litellm_model(ENHANCER_MODEL)
+    litellm_model = _to_litellm_model(get_auxiliary_model("enhancer"))
     messages = _build_ai_agent_messages(
         original_prompt,
         task_type,

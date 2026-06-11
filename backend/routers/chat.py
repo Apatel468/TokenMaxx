@@ -10,11 +10,12 @@ POST /chat pipeline:
   6. Track costs and persist to SQLite
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import ChatRequest, ChatResponse
+from services.model_settings import NoModelsEnabledError
 from services.context_builder import build_context
 from services.conversation_store import (
     get_conversation_or_404,
@@ -53,8 +54,11 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     # Step 3: Enhance prompt + build context (prompt_enhancer runs inside build_context)
     context = build_context(request.prompt, analysis, prior_messages=prior_messages)
 
-    # Step 4: Pick Groq model from config/models.yaml
-    decision = route(context)
+    # Step 4: Score all enabled Groq models and pick the best
+    try:
+        decision = route(context, db)
+    except NoModelsEnabledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Step 5: Send system prompt + enhanced history to Groq (or mock fallback)
     model_response = generate_response(
@@ -97,4 +101,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         estimated_actual_cost=costs.actual_cost,
         estimated_premium_cost=costs.premium_cost,
         estimated_savings_percentage=costs.savings_percentage,
+        preferred_model=decision.preferred_model_id,
+        used_fallback=decision.used_fallback,
+        fallback_message=decision.fallback_message,
+        routing_score=decision.score,
+        candidate_models=decision.candidate_models,
     )

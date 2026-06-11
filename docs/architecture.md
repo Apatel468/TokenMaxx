@@ -2,7 +2,7 @@
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
 > Technical architecture reference. Pair with `project_memory.md` for context.  
-> **Version:** 0.2.2 · **Last updated:** June 2026
+> **Version:** 0.3.0 · **Last updated:** June 2026
 
 ---
 
@@ -10,12 +10,10 @@
 
 | Tier | Role |
 |------|------|
-| **Presentation** | React SPA (Vite, port 5173 or 5174) |
+| **Presentation** | React SPA (Vite, port 5173 or 5174) — Chat, Analytics, Model Controls |
 | **Application** | FastAPI monolith (port 8001) |
 | **Data** | SQLite (`smartllm_router.db`) |
-| **External** | Groq API via LiteLLM |
-
-CORS in `main.py` allows `localhost` and `127.0.0.1` on ports **5173** and **5174** (Vite picks 5174 when 5173 is in use).
+| **External** | Groq API via LiteLLM + `GET /openai/v1/models` for catalog sync |
 
 ---
 
@@ -23,17 +21,17 @@ CORS in `main.py` allows `localhost` and `127.0.0.1` on ports **5173** and **517
 
 | Service | Input | Output | Notes |
 |---------|-------|--------|-------|
-| `prompt_analyzer` | prompt | `AnalysisResult` | Keyword classify; default `difficulty`/`risk_level` |
-| `prompt_enhancer` | prompt + metadata + history | `EnhancementResult` | Groq AI JSON; rule fallback |
+| `prompt_analyzer` | prompt | `AnalysisResult` | Keyword classify |
+| `prompt_enhancer` | prompt + metadata | `EnhancementResult` | Groq AI JSON; rule fallback |
 | `context_builder` | prompt + analysis + history | `PromptContext` | Builds `message_history` |
-| `router_engine` | `PromptContext` | `RoutingDecision` | `groq_model` from `models.yaml` |
-| `config_loader` | — | YAML dict | Routes, pricing, aliases |
-| `model_clients` | model + context + messages | `ModelResponse` | LiteLLM; mock fallback |
-| `response_cleaner` | raw text | cleaned text | Strips Qwen thinking tags |
-| `cost_tracker` | model + context + response | `CostEstimate` | YAML pricing vs GPT-4o baseline |
+| `groq_models` | — | `GroqModelRecord[]` | API + registry merge; logs missing models |
+| `model_scorer` | task_type + candidates | `CandidateScore[]` | Composite routing formula |
+| `router_engine` | `PromptContext` + DB | `RoutingDecision` | Picks best enabled model |
+| `model_settings` | DB | enable/disable state | Seeds from routable catalog |
+| `config_loader` | — | YAML dict | Task profiles, auxiliary models |
+| `model_clients` | model + context | `ModelResponse` | LiteLLM; mock fallback |
+| `cost_tracker` | model + response | `CostEstimate` | Registry pricing vs GPT-4o |
 | `conversation_store` | turn data | `(id, title)` | Persists messages + model_runs |
-| `conversation_title` | user + assistant text | title string | 3–8 words; once per thread |
-| `report_generator` | DB session | analytics DTOs | |
 
 ---
 
@@ -43,135 +41,86 @@ CORS in `main.py` allows `localhost` and `127.0.0.1` on ports **5173** and **517
 Client → POST /chat { prompt, conversation_id? }
   → load_message_history()
   → analyze_prompt()           # keyword → task_type
-  → build_context()            # enhance_prompt() → enhanced_prompt, system_prompt
-  → route()                    # models.yaml → groq_model
+  → build_context()            # enhance_prompt()
+  → route(context, db)         # score all enabled Groq models
   → generate_response()        # LiteLLM
   → clean_model_response()
-  → estimate_costs() + log_request_metrics()
-  → save_chat_turn()           # + title on first reply
-  → ChatResponse
+  → estimate_costs()
+  → save_chat_turn()
+  → ChatResponse (+ routing_score, candidate_models)
 ```
 
 ---
 
-## Prompt Classification (`prompt_analyzer.py`)
+## Dynamic Model Routing
 
-**Current implementation:**
-- Word-boundary keyword scoring against `_KEYWORD_RULES`
-- Output: `task_type`, `confidence`, `keywords_matched`
-- Defaults: `difficulty="medium"`, `risk_level="low"` (used by `prompt_enhancer`)
+### Configuration split
 
-**Task alias mapping** (`config_loader._TASK_ALIASES`):
-- summarization, creative_writing, data_analysis → `report`
-- translation → `general_qa`
+| File | Purpose |
+|------|---------|
+| `config/model_registry.py` | Per-model metadata: scores, cost, latency, strengths |
+| `config/models.yaml` | Task profiles (capability weights), auxiliary models, premium baseline |
+| SQLite `model_settings` | User enable/disable per model id |
 
-**Planned (Phase 3B):** Groq `llama-3.1-8b-instant` JSON classifier with keyword fallback.
+### Scoring formula (`model_scorer.py`)
 
----
+```
+score = (task_match × 0.4) + (cost_efficiency × 0.2)
+      + (speed_score × 0.2) + (reasoning_score × 0.2)
+```
 
-## Model Routing (`router_engine.py`)
+- **task_match** — weighted blend of `coding_score`, `writing_score`, `reasoning_score` from registry, using `task_profiles` in YAML
+- **cost_efficiency** / **speed_score** — normalized relative to all routable candidates (cheaper/faster → higher)
+- **reasoning_score** — direct from registry (0–100)
 
-Reads `config_loader.get_route_for_task(task_type)` — **no hard-coded model table**.
+### RoutingDecision (extended)
 
 ```python
 @dataclass
 class RoutingDecision:
-    model_id: str       # Groq model id (cost lookup)
-    model_label: str    # "Groq / {model}"
-    reason: str
-    groq_model: str     # Passed to model_clients / LiteLLM
-    provider: str       # "groq"
+    model_id: str
+    model_label: str
+    groq_model: str
+    score: float
+    candidate_models: list[dict]
+    preferred_model_id: str
+    used_fallback: bool
+    fallback_message: str
 ```
 
-| YAML Key | Groq Model |
-|----------|------------|
-| `flashcards` | `llama-3.3-70b-versatile` |
-| `coding` | `qwen/qwen3-32b` |
-| `general_qa` | `llama-3.1-8b-instant` |
-| `report` | `llama-3.3-70b-versatile` |
+---
+
+## Model Controls API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/settings/models` | List routable models + enabled state |
+| PUT | `/settings/models` | Bulk enable/disable toggles |
 
 ---
 
 ## Cost Tracking (`cost_tracker.py`)
 
-- Rates from `models.yaml` → `pricing` (per Groq model)
-- Baseline from `premium_baseline` (GPT-4o illustrative rates)
-- Uses real `input_tokens` from LiteLLM when available
-- `log_request_metrics()` writes structured INFO log per request
+- Rates from `model_registry.py` via `cost_per_1k_tokens()`
+- Baseline from `models.yaml` → `premium_baseline`
 
 ---
 
-## Prompt Engineering (`prompt_enhancer.py`)
+## Frontend Tabs
 
-- **AI:** Groq `llama-3.1-8b-instant` → JSON `enhanced_prompt`, `system_prompt`, `enhancement_reason`
-- **Fallback:** `_TASK_RULES` templates → `enhancement_method = "rule_fallback"`
-- Only the **latest** user turn is enhanced; prior DB messages stay original
-
-**Prompt comparison** (original vs enhanced):
-- `POST /chat` → `original_prompt` + `enhanced_prompt`
-- `model_runs.enhanced_prompt` in analytics history
-- No separate comparison service
+| Tab | Component | Notes |
+|-----|-----------|-------|
+| Chat | `ChatPage.jsx` | 3-column; routing score + top candidates |
+| Analytics | `AnalyticsDashboard.jsx` | KPIs, model table, history — vertical scroll only |
+| Model Controls | `ModelControls.jsx` | Toggle routable Groq models |
 
 ---
 
-## Conversation Titles
+## Database Tables
 
-| Rule | Detail |
-|------|--------|
-| Trigger | After first assistant reply saved |
-| Inputs | First user message + first assistant response |
-| AI model | `llama-3.1-8b-instant` |
-| Length | 3–8 words, ChatGPT-style |
-| Storage | `conversations.title` — never overwritten |
-| List API | Rule-based backfill only (`use_ai=False`) |
-| Placeholder | `"New Chat"` until title exists |
-
----
-
-## Database Schema
-
-- **`conversations`** — `id`, timestamps, `title` (nullable)
-- **`messages`** — `role`, `content` (user = original prompt)
-- **`model_runs`** — routing, tokens, costs, `enhanced_prompt`, `system_prompt`, `enhancement_reason`
-- **`chat_history`** — legacy, unused
-
-Migrations on startup: `_migrate_model_runs_columns()`, `_migrate_conversations_columns()`.
-
----
-
-## Frontend
-
-| File | Role |
-|------|------|
-| `App.jsx` | Chat \| Analytics tabs |
-| `ChatPage.jsx` | Sidebar + thread + routing panel |
-| `AnalyticsDashboard.jsx` | Summary, model usage, history |
-| `api/config.js` | `API_BASE = http://127.0.0.1:8001` |
-| `utils/conversationTitle.js` | Title display helpers |
-
----
-
-## LiteLLM Call Sites
-
-| File | Model | When |
-|------|-------|------|
-| `prompt_enhancer` | `groq/llama-3.1-8b-instant` | Every turn |
-| `model_clients` | `groq/{routed}` | Every turn |
-| `conversation_title` | `groq/llama-3.1-8b-instant` | First turn only |
-| `prompt_analyzer` | (planned) | — |
-
----
-
-## Service Dependency Graph
-
-```
-chat.py
-  ├── prompt_analyzer
-  ├── context_builder → prompt_enhancer
-  ├── router_engine → config_loader
-  ├── model_clients → response_cleaner
-  ├── cost_tracker → config_loader
-  └── conversation_store → conversation_title
-```
-
----
+| Table | Purpose |
+|-------|---------|
+| `conversations` | Thread metadata + title |
+| `messages` | User/assistant content |
+| `model_runs` | Routing, tokens, costs per reply |
+| `model_settings` | `model_id` + `enabled` flag |

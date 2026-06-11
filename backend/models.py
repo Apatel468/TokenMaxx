@@ -65,11 +65,57 @@ class ChatResponse(BaseModel):
     estimated_savings_percentage: float = Field(
         description="How much cheaper the chosen model was vs. premium (0-100)."
     )
+    preferred_model: str = Field(
+        default="",
+        description="Model that would have been chosen before enable/disable rules.",
+    )
+    used_fallback: bool = Field(
+        default=False,
+        description="True when a different enabled model was used because preferred was disabled.",
+    )
+    fallback_message: str = Field(
+        default="",
+        description='Set to "Preferred model disabled — fallback used" when applicable.',
+    )
+    routing_score: float = Field(
+        default=0.0,
+        description="Composite routing score (0–100) for the selected model.",
+    )
+    candidate_models: list[dict] = Field(
+        default_factory=list,
+        description="All scored candidates: model_id, score, task_match, etc.",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Model catalog models
 # ---------------------------------------------------------------------------
+
+class ModelControlItem(BaseModel):
+    """One routable model row in Model Controls."""
+
+    model_id: str
+    name: str
+    provider: str
+    tier: str
+    task_types: list[str]
+    enabled: bool
+    cost_per_1k_input: float
+    cost_per_1k_output: float
+
+
+class ModelControlToggle(BaseModel):
+    """Single enable/disable change from Model Controls."""
+
+    model_id: str
+    enabled: bool
+
+
+class ModelControlsUpdate(BaseModel):
+    """Bulk update for model enable/disable toggles."""
+
+    models: list[ModelControlToggle]
+
 
 class ModelInfo(BaseModel):
     """Describes one AI model in our catalog."""
@@ -82,6 +128,16 @@ class ModelInfo(BaseModel):
     cost_per_1k_output: float
     strengths: list[str]
     avg_latency_ms: int
+
+
+class ModelSyncSummary(BaseModel):
+    """Result of GET /models/sync — Groq API vs registry comparison."""
+
+    total: int
+    routable: int
+    in_registry: int
+    in_groq_api: int
+    missing_from_registry: list[str]
 
 
 # ---------------------------------------------------------------------------

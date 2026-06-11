@@ -399,6 +399,12 @@ function ChatPage({ onChatComplete }) {
 
                 <div className="routing-panel__info">
 
+                  {result.used_fallback && result.fallback_message && (
+                    <div className="routing-fallback-badge" role="status">
+                      {result.fallback_message}
+                    </div>
+                  )}
+
                   <div className="result__grid">
 
                     <div className="stat-card">
@@ -425,7 +431,57 @@ function ChatPage({ onChatComplete }) {
 
                     </div>
 
+                    {result.routing_score > 0 && (
+
+                      <div className="stat-card">
+
+                        <span className="stat-card__label">Routing Score</span>
+
+                        <span className="stat-card__value">
+
+                          {result.routing_score.toFixed(1)}
+
+                        </span>
+
+                      </div>
+
+                    )}
+
                   </div>
+
+                  {result.candidate_models?.length > 1 && (
+
+                    <div className="candidate-models">
+
+                      <span className="candidate-models__label">Top candidates</span>
+
+                      <ul className="candidate-models__list">
+
+                        {result.candidate_models.slice(0, 5).map((c) => (
+
+                          <li key={c.model_id} className="candidate-models__item">
+
+                            <span className="candidate-models__name">
+
+                              {c.model_name || c.model_id}
+
+                            </span>
+
+                            <span className="candidate-models__score">
+
+                              {c.score}
+
+                            </span>
+
+                          </li>
+
+                        ))}
+
+                      </ul>
+
+                    </div>
+
+                  )}
 
                   <div className="reason-box">
 

@@ -6,10 +6,11 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 
 ## Features
 
-- Task-aware model routing via `config/models.yaml`
+- **Dynamic routing** — scores all Groq models via `model_registry.py` + composite formula
+- **Model Controls** — enable/disable models; intelligent fallback when preferred is off
 - AI prompt engineering with rule-based fallback
 - Multi-turn conversations with auto-generated titles
-- Real-time analytics: cost, savings, and model usage
+- Real-time analytics: cost, savings, model usage, and routing scores
 
 ## Quick Start
 

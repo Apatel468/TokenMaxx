@@ -1,14 +1,15 @@
 """
 Cost Tracker — estimates token usage and dollar costs.
 
-Pricing is loaded from config/models.yaml.
+Pricing is loaded from config/model_registry.py.
 Savings compare each Groq model vs. the premium baseline (GPT-4o) in YAML.
 """
 
 import logging
 from dataclasses import dataclass
 
-from services.config_loader import get_premium_baseline, get_pricing
+from config.model_registry import cost_per_1k_tokens
+from services.config_loader import get_premium_baseline
 from services.context_builder import PromptContext
 from services.model_clients import ModelResponse
 
@@ -39,14 +40,8 @@ def _calculate_cost(
 
 
 def _get_model_rates(model_id: str) -> tuple[float, float]:
-    """
-    Look up Groq input/output rates for a model from models.yaml.
-
-    Falls back to llama-3.1-8b-instant rates if the model is unknown.
-    """
-    pricing = get_pricing()
-    rates = pricing.get(model_id) or pricing.get("llama-3.1-8b-instant", {})
-    return rates.get("input", 0.00005), rates.get("output", 0.00008)
+    """Look up per-1K token rates from model_registry.py."""
+    return cost_per_1k_tokens(model_id)
 
 
 def estimate_costs(

@@ -1,8 +1,9 @@
 # TokenMaxx — Demo Script
 
-> **Tagline:** Maximum Intelligence, Minimum Cost
+> **Tagline:** Maximum Intelligence, Minimum Cost  
+> **Version:** 0.3.0
 
-Use this script to demo TokenMaxx to stakeholders in 5–10 minutes.
+Use this script to demo TokenMaxx to stakeholders in 8–12 minutes.
 
 ---
 
@@ -11,16 +12,13 @@ Use this script to demo TokenMaxx to stakeholders in 5–10 minutes.
 1. Start backend: `uvicorn main:app --reload --port 8001`
 2. Start frontend: `npm run dev`
 3. Open http://localhost:5173
-4. Confirm header shows **TokenMaxx** and tagline **Maximum Intelligence, Minimum Cost**
-5. Ensure `GROQ_API_KEY` is set in `backend/.env` for live responses
+4. Ensure `GROQ_API_KEY` is set in `backend/.env`
 
 ---
 
 ## Act 1 — Intro (30 seconds)
 
-> "This is **TokenMaxx** — Maximum Intelligence, Minimum Cost. Instead of sending every request to an expensive model, TokenMaxx classifies the task, engineers the prompt, and routes to the right Groq model automatically."
-
-Point out the header branding and footer tagline.
+> "This is **TokenMaxx** — Maximum Intelligence, Minimum Cost. It scores every Groq model for your task, picks the best enabled option, and tracks savings vs. always using premium."
 
 ---
 
@@ -31,56 +29,49 @@ Point out the header branding and footer tagline.
 Highlight in the routing panel:
 
 - Task type classified
-- Model selected (e.g. Groq Llama 3.1 8B)
-- Actual cost vs premium baseline
-- Savings percentage
-
-> "A simple question doesn't need a premium model — TokenMaxx picked a fast, cheap option."
+- **Routing score** and **top candidates** list
+- Model selected and savings %
 
 ---
 
-## Act 3 — Coding task (2 minutes)
+## Act 3 — Model Controls (2 minutes)
+
+Switch to **Model Controls** tab.
+
+1. Show all routable Groq models with tiers and costs
+2. Disable the top-scored model for a task type
+3. Send another chat → show **"Preferred model disabled — fallback used"** badge
+
+---
+
+## Act 4 — Coding task (2 minutes)
 
 **Prompt:** `Write a Python function to check if a number is prime`
 
-Show:
-
-- Different model routed (e.g. Qwen for coding)
-- Enhanced prompt sent to the model (mention API returns this)
-- Conversation title appears in sidebar after first reply
+Show different model ranking (coding weights favor high `coding_score` models).
 
 ---
 
-## Act 4 — Analytics (2 minutes)
+## Act 5 — Analytics (2 minutes)
 
 Switch to **Analytics** tab.
 
-Walk through:
-
-- Total chats and costs
-- Model usage breakdown
-- Recent conversations with savings per turn
-
-> "Every request is tracked — you can see exactly how much TokenMaxx saved versus always using GPT-4o."
+- KPI cards (total chats, costs, savings)
+- Model usage breakdown (names wrap — no horizontal scroll)
+- Recent conversations with per-turn costs
 
 ---
 
-## Act 5 — Multi-turn memory (1 minute)
+## Act 6 — API (optional, 1 minute)
 
-Return to **Chat**, continue the coding conversation:
+Open http://127.0.0.1:8001/docs
 
-**Prompt:** `Add error handling to that function`
-
-Show that context is preserved and routing/cost updates in the side panel.
-
----
-
-## Closing (30 seconds)
-
-> "TokenMaxx delivers maximum intelligence at minimum cost — smart routing, prompt engineering, and full visibility into savings. Questions?"
+- `POST /chat` — `routing_score`, `candidate_models`
+- `GET /settings/models` — Model Controls API
+- `GET /models/sync` — Groq catalog vs registry
 
 ---
 
-## Fallback (no API key)
+## Closing
 
-If Groq is unavailable, explain that TokenMaxx falls back to rule-based enhancement and mock responses so the full pipeline still demos end-to-end.
+> "TokenMaxx doesn't lock you to three models — it scores the full Groq catalog, lets you control what's allowed, and proves cost savings on every request."
