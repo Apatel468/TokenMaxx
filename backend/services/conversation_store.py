@@ -1,8 +1,8 @@
 """
 Conversation Store — read/write multi-turn conversations in SQLite (Phase 3A).
 
-Each conversation can have many user + assistant messages.
-Every assistant reply also gets a model_runs row with routing + cost data.
+Each conversation belongs to one user (user_id). Admins can access all threads
+via separate admin endpoints; regular users only see their own rows.
 """
 
 from datetime import datetime, timezone
@@ -10,21 +10,33 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database import Conversation, Message, ModelRun
+from database import Conversation, Message, ModelRun, User
 from models import ConversationDetail, ConversationListItem, MessageOut
 from services.cost_tracker import CostEstimate
 from services.model_clients import ModelResponse
 from services.conversation_title import generate_conversation_title
+from services.timezone_utils import format_timestamp_eastern
 from services.router_engine import RoutingDecision
 
 
-def get_conversation_or_404(db: Session, conversation_id: int) -> Conversation:
-    """Load a conversation by id or raise 404."""
+def _user_owns_conversation(conversation: Conversation, user: User) -> bool:
+    """True when this user may read/write the conversation (admins use /admin for org-wide data)."""
+    return conversation.user_id == user.id
+
+
+def get_conversation_or_404(
+    db: Session,
+    conversation_id: int,
+    user: User | None = None,
+) -> Conversation:
+    """Load a conversation by id; optionally enforce owner (403 if not allowed)."""
     conversation = (
         db.query(Conversation).filter(Conversation.id == conversation_id).first()
     )
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if user is not None and not _user_owns_conversation(conversation, user):
+        raise HTTPException(status_code=403, detail="Not your conversation.")
     return conversation
 
 
@@ -70,11 +82,6 @@ def _maybe_generate_and_store_title(
     *,
     use_ai: bool = True,
 ) -> str | None:
-    """
-    Generate and persist a title when missing and the first reply exists.
-
-    Never overwrites an existing title.
-    """
     if conversation.title and conversation.title.strip():
         return conversation.title.strip()
 
@@ -95,12 +102,6 @@ def _resolve_title(
     persist_if_missing: bool = False,
     use_ai: bool = True,
 ) -> str:
-    """
-    Return stored title, or a placeholder until the first reply is saved.
-
-    When persist_if_missing is True, backfills a missing title if the first
-    user + assistant messages are already in the database.
-    """
     if conversation.title and conversation.title.strip():
         return conversation.title.strip()
 
@@ -115,11 +116,7 @@ def _resolve_title(
 
 
 def load_message_history(db: Session, conversation_id: int) -> list[dict]:
-    """
-    Load prior messages as LiteLLM-style dicts: {role, content}.
-
-    Ordered oldest → newest. Used to build context for follow-up messages.
-    """
+    """Load prior messages as LiteLLM-style dicts: {role, content}."""
     rows = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -137,31 +134,25 @@ def save_chat_turn(
     decision: RoutingDecision,
     model_response: ModelResponse,
     costs: CostEstimate,
+    user_id: int,
     conversation_id: int | None = None,
     enhanced_prompt: str = "",
     system_prompt: str = "",
     enhancement_reason: str = "",
 ) -> tuple[int, str | None]:
-    """
-    Save one user message + assistant reply (+ model_run).
-
-    If conversation_id is None, starts a new conversation.
-    If conversation_id is set, appends to that existing thread.
-
-    After the first assistant reply, generates and stores a title once.
-
-    Returns:
-        (conversation id, title or None if not yet generated)
-    """
+    """Save one user message + assistant reply (+ model_run) for user_id."""
     if conversation_id:
         conversation = get_conversation_or_404(db, conversation_id)
+        if conversation.user_id is not None and conversation.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not your conversation.")
+        if conversation.user_id is None:
+            conversation.user_id = user_id
         conversation.updated_at = datetime.now(timezone.utc)
     else:
-        conversation = Conversation()
+        conversation = Conversation(user_id=user_id)
         db.add(conversation)
         db.flush()
 
-    # User turn
     user_message = Message(
         conversation_id=conversation.id,
         role="user",
@@ -169,7 +160,6 @@ def save_chat_turn(
     )
     db.add(user_message)
 
-    # Assistant turn
     assistant_message = Message(
         conversation_id=conversation.id,
         role="assistant",
@@ -181,6 +171,7 @@ def save_chat_turn(
     savings_usd = costs.premium_cost - costs.actual_cost
     model_run = ModelRun(
         conversation_id=conversation.id,
+        user_id=user_id,
         assistant_message_id=assistant_message.id,
         task_type=task_type,
         selected_model=decision.model_id,
@@ -199,7 +190,6 @@ def save_chat_turn(
     )
     db.add(model_run)
 
-    # Generate title in the same commit as the first assistant reply
     title: str | None = None
     if not (conversation.title and conversation.title.strip()):
         title = _generate_title_from_first_exchange(db, conversation)
@@ -212,10 +202,13 @@ def save_chat_turn(
     return conversation.id, conversation.title or title
 
 
-def list_conversations(db: Session, limit: int = 50) -> list[ConversationListItem]:
-    """Return recent conversations for GET /conversations."""
+def list_conversations(
+    db: Session, user: User, limit: int = 50
+) -> list[ConversationListItem]:
+    """Return recent conversations for the current user only."""
     rows = (
         db.query(Conversation)
+        .filter(Conversation.user_id == user.id)
         .order_by(Conversation.updated_at.desc())
         .limit(limit)
         .all()
@@ -229,29 +222,27 @@ def list_conversations(db: Session, limit: int = 50) -> list[ConversationListIte
             .order_by(Message.created_at.asc())
             .all()
         )
-        # Fast rule-based backfill for old threads; new chats get AI titles on save
-        title = _resolve_title(
-            db, conv, persist_if_missing=True, use_ai=False
-        )
-        preview = title
+        title = _resolve_title(db, conv, persist_if_missing=True, use_ai=False)
 
         results.append(
             ConversationListItem(
                 id=conv.id,
                 title=title,
-                preview=preview,
+                preview=title,
                 message_count=len(messages),
-                created_at=conv.created_at,
-                updated_at=conv.updated_at,
+                created_at=format_timestamp_eastern(conv.created_at),
+                updated_at=format_timestamp_eastern(conv.updated_at),
             )
         )
 
     return results
 
 
-def get_conversation_detail(db: Session, conversation_id: int) -> ConversationDetail:
-    """Return full message history for GET /conversations/{id}."""
-    conversation = get_conversation_or_404(db, conversation_id)
+def get_conversation_detail(
+    db: Session, conversation_id: int, user: User
+) -> ConversationDetail:
+    """Return full message history if the user owns this conversation."""
+    conversation = get_conversation_or_404(db, conversation_id, user=user)
     messages = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -269,10 +260,10 @@ def get_conversation_detail(db: Session, conversation_id: int) -> ConversationDe
                 id=m.id,
                 role=m.role,
                 content=m.content,
-                created_at=m.created_at,
+                created_at=format_timestamp_eastern(m.created_at),
             )
             for m in messages
         ],
-        created_at=conversation.created_at,
-        updated_at=conversation.updated_at,
+        created_at=format_timestamp_eastern(conversation.created_at),
+        updated_at=format_timestamp_eastern(conversation.updated_at),
     )

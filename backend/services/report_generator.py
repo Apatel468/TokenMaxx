@@ -1,22 +1,37 @@
 """
 Report Generator — builds analytics from conversations + model_runs tables.
 
-Powers the GET /analytics/* endpoints.
+Regular users only see their own runs; admins use get_employee_usage_metrics()
+for organization-wide employee usage on the admin dashboard.
 """
+
+from collections import Counter
 
 from sqlalchemy.orm import Session
 
-from database import Message, ModelRun
-from models import AnalyticsSummary, ConversationRecord, HistoryRecord, ModelUsageRecord
+from database import Message, ModelRun, User
+from models import (
+    AnalyticsSummary,
+    ConversationRecord,
+    EmployeeUsageRecord,
+    HistoryRecord,
+    ModelUsageRecord,
+)
+from services.timezone_utils import format_timestamp_eastern
 
 
-def generate_analytics_summary(db: Session) -> AnalyticsSummary:
+def _runs_for_user(db: Session, user_id: int):
+    """Base query: model_runs belonging to one user."""
+    return db.query(ModelRun).filter(ModelRun.user_id == user_id)
+
+
+def generate_analytics_summary(db: Session, user_id: int) -> AnalyticsSummary:
     """
-    Aggregate all model_runs into summary totals.
+    Aggregate one user's model_runs into summary totals.
 
     Returns zeros when no chats exist yet.
     """
-    runs = db.query(ModelRun).all()
+    runs = _runs_for_user(db, user_id).all()
 
     if not runs:
         return AnalyticsSummary(
@@ -31,7 +46,6 @@ def generate_analytics_summary(db: Session) -> AnalyticsSummary:
     premium_baseline_cost = sum(r.premium_model_cost for r in runs)
     total_savings = sum(r.savings_usd for r in runs)
 
-    # Overall savings % vs. what premium would have cost
     if premium_baseline_cost > 0:
         savings_percentage = (total_savings / premium_baseline_cost) * 100
     else:
@@ -67,14 +81,12 @@ def _get_user_message_for_run(db: Session, run: ModelRun) -> Message | None:
     )
 
 
-def get_model_run_records(db: Session, limit: int = 20) -> list[ConversationRecord]:
-    """
-    Return recent model runs — one row per AI reply (supports multi-turn).
-
-    Includes enhanced_prompt from Phase 4 prompt engineering.
-    """
+def get_model_run_records(
+    db: Session, user_id: int, limit: int = 20
+) -> list[ConversationRecord]:
+    """Return recent model runs for one user — one row per AI reply."""
     runs = (
-        db.query(ModelRun)
+        _runs_for_user(db, user_id)
         .order_by(ModelRun.created_at.desc())
         .limit(limit)
         .all()
@@ -102,26 +114,24 @@ def get_model_run_records(db: Session, limit: int = 20) -> list[ConversationReco
                 savings=run.savings_usd,
                 savings_percentage=run.savings_percentage,
                 latency_ms=run.latency_ms,
-                timestamp=run.created_at,
+                timestamp=format_timestamp_eastern(run.created_at),
             )
         )
 
     return results
 
 
-def get_conversations(db: Session, limit: int = 20) -> list[ConversationRecord]:
+def get_conversations(
+    db: Session, user_id: int, limit: int = 20
+) -> list[ConversationRecord]:
     """Return recent model runs (alias for analytics conversation rows)."""
-    return get_model_run_records(db, limit=limit)
+    return get_model_run_records(db, user_id, limit=limit)
 
 
-def get_history(db: Session, limit: int = 20) -> list[HistoryRecord]:
-    """
-    Return recent chat history for GET /analytics/history.
-
-    Each row is one model_run (one turn), including enhanced_prompt when stored.
-    """
+def get_history(db: Session, user_id: int, limit: int = 20) -> list[HistoryRecord]:
+    """Return recent chat history for GET /analytics/history (scoped to one user)."""
     runs = (
-        db.query(ModelRun)
+        _runs_for_user(db, user_id)
         .order_by(ModelRun.created_at.desc())
         .limit(limit)
         .all()
@@ -144,22 +154,17 @@ def get_history(db: Session, limit: int = 20) -> list[HistoryRecord]:
                 actual_cost=run.estimated_cost,
                 premium_cost=run.premium_model_cost,
                 savings_percentage=run.savings_percentage,
-                timestamp=run.created_at,
+                timestamp=format_timestamp_eastern(run.created_at),
             )
         )
 
     return results
 
 
-def get_model_usage(db: Session) -> list[ModelUsageRecord]:
-    """
-    Aggregate usage stats grouped by selected_model.
+def get_model_usage(db: Session, user_id: int) -> list[ModelUsageRecord]:
+    """Aggregate usage stats grouped by selected_model for one user."""
+    runs = _runs_for_user(db, user_id).all()
 
-    Shows how often each Groq model was used and total cost per model.
-    """
-    runs = db.query(ModelRun).all()
-
-    # Group runs by model name in Python (simple for MVP SQLite size)
     stats: dict[str, dict] = {}
     for run in runs:
         if run.selected_model not in stats:
@@ -194,3 +199,42 @@ def get_model_usage(db: Session) -> list[ModelUsageRecord]:
         )
 
     return results
+
+
+def get_employee_usage_metrics(db: Session) -> list[EmployeeUsageRecord]:
+    """
+    Admin dashboard: per-user totals across all model_runs.
+
+    Includes most-used models (top 3) for each employee.
+    """
+    users = db.query(User).order_by(User.email.asc()).all()
+    records: list[EmployeeUsageRecord] = []
+
+    for user in users:
+        runs = _runs_for_user(db, user.id).all()
+        total_input = sum(r.input_tokens for r in runs)
+        total_output = sum(r.output_tokens for r in runs)
+        actual_cost = sum(r.estimated_cost for r in runs)
+        premium_cost = sum(r.premium_model_cost for r in runs)
+        savings = sum(r.savings_usd for r in runs)
+        savings_pct = (savings / premium_cost * 100) if premium_cost > 0 else 0.0
+
+        model_counts = Counter(r.selected_model for r in runs)
+        most_used = [name for name, _ in model_counts.most_common(3)]
+
+        records.append(
+            EmployeeUsageRecord(
+                user_id=user.id,
+                email=user.email,
+                total_chats=len(runs),
+                total_input_tokens=total_input,
+                total_output_tokens=total_output,
+                actual_cost=round(actual_cost, 6),
+                premium_baseline_cost=round(premium_cost, 6),
+                savings=round(savings, 6),
+                savings_percentage=round(savings_pct, 2),
+                most_used_models=most_used,
+            )
+        )
+
+    return records

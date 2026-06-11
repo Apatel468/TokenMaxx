@@ -1,27 +1,19 @@
 /**
- * Analytics API helpers — fetch SQLite stats from the backend.
+ * Analytics API helpers — fetch SQLite stats from the backend (scoped to logged-in user).
  */
-import { API_BASE } from "./config.js";
-
-async function fetchJson(path) {
-  const response = await fetch(`${API_BASE}${path}`);
-  if (!response.ok) {
-    throw new Error(`Analytics request failed (${response.status})`);
-  }
-  return response.json();
-}
+import { authFetch } from "./http.js";
 
 /** GET /analytics/summary — totals for the dashboard cards */
 export function fetchSummary() {
-  return fetchJson("/analytics/summary");
+  return authFetch("/analytics/summary");
 }
 
 /** GET /analytics/history — recent chat rows */
 export function fetchHistory(limit = 20) {
-  return fetchJson(`/analytics/history?limit=${limit}`);
+  return authFetch(`/analytics/history?limit=${limit}`);
 }
 
 /** GET /analytics/model-usage — per-model breakdown */
 export function fetchModelUsage() {
-  return fetchJson("/analytics/model-usage");
+  return authFetch("/analytics/model-usage");
 }

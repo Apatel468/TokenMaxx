@@ -3,9 +3,9 @@ Router Engine — scores all enabled Groq models and picks the best fit.
 
 Routing is fully dynamic:
   1. Load routable models from groq_models (API + model_registry.py)
-  2. Filter to user-enabled models (SQLite model_settings)
+  2. Filter to models enabled by BOTH admin and the current user
   3. Score each candidate via model_scorer.py
-  4. Pick highest score; if preferred (top) is disabled, use next enabled
+  4. Pick highest score; if preferred (top) is unavailable, use next available
 
 To add a new Groq model: edit backend/config/model_registry.py only.
 """
@@ -17,10 +17,10 @@ from sqlalchemy.orm import Session
 from services.config_loader import get_task_profile, resolve_task_key
 from services.context_builder import PromptContext
 from services.groq_models import GroqModelRecord, get_routable_models
-from services.model_scorer import CandidateScore, score_candidates
+from services.model_scorer import score_candidates
 from services.model_settings import (
-    FALLBACK_BADGE,
     NoModelsEnabledError,
+    explain_preferred_unavailable,
     get_enabled_model_ids,
 )
 
@@ -47,11 +47,11 @@ def _records_for_ids(
     return [r for r in catalog if r.model_id in model_ids]
 
 
-def route(context: PromptContext, db: Session) -> RoutingDecision:
+def route(context: PromptContext, db: Session, user_id: int) -> RoutingDecision:
     """
-    Score every enabled routable Groq model and select the best.
+    Score every admin+user enabled routable Groq model and select the best.
 
-    Raises NoModelsEnabledError when every model is toggled off.
+    Raises NoModelsEnabledError when no models pass both preference layers.
     """
     catalog = get_routable_models()
     if not catalog:
@@ -60,20 +60,20 @@ def route(context: PromptContext, db: Session) -> RoutingDecision:
             "and your Groq API key."
         )
 
-    enabled_ids = get_enabled_model_ids(db)
+    enabled_ids = get_enabled_model_ids(db, user_id)
     if not enabled_ids:
         raise NoModelsEnabledError(
-            "No models are enabled. Open Model Controls and enable at least one model."
+            "No models are enabled for your account. Open Model Controls and "
+            "enable at least one model (or ask an admin to re-enable org models)."
         )
 
     enabled_catalog = _records_for_ids(catalog, enabled_ids)
     if not enabled_catalog:
         raise NoModelsEnabledError(
             "No enabled models match the Groq catalog. "
-            "Enable routable models in Model Controls."
+            "Check Model Controls or contact an admin."
         )
 
-    # Score ALL routable models (including disabled) to find theoretical preferred
     all_scored = score_candidates(context.task_type, catalog)
     candidate_dicts = [c.to_dict() for c in all_scored]
 
@@ -82,7 +82,8 @@ def route(context: PromptContext, db: Session) -> RoutingDecision:
 
     if not enabled_scored:
         raise NoModelsEnabledError(
-            "No models are enabled. Open Model Controls and enable at least one model."
+            "No models are enabled for your account. Open Model Controls and "
+            "enable at least one model."
         )
 
     winner = enabled_scored[0]
@@ -91,12 +92,14 @@ def route(context: PromptContext, db: Session) -> RoutingDecision:
     profile = get_task_profile(context.task_type)
 
     if used_fallback:
-        reason = (
-            f"Preferred model ({preferred_id}) is disabled. "
-            f"Scored {winner.model_id} highest among enabled models "
-            f"(score {winner.score}) for {task_key} — {profile.get('description', '')}"
+        fragment, fallback_message = explain_preferred_unavailable(
+            preferred_id, db, user_id
         )
-        fallback_message = FALLBACK_BADGE
+        reason = (
+            f"{fragment} Scored {winner.model_id} highest among available models "
+            f"(score {winner.score}) for {task_key} — "
+            f"{profile.get('description', '')}"
+        )
     else:
         reason = (
             f"Scored {winner.model_id} highest (score {winner.score}) for "

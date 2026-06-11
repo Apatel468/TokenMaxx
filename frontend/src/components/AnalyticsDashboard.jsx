@@ -17,10 +17,6 @@ function formatCost(value) {
   return `$${Number(value).toFixed(6)}`;
 }
 
-function formatDate(iso) {
-  return new Date(iso).toLocaleString();
-}
-
 function truncate(text, max = 180) {
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -191,7 +187,7 @@ function AnalyticsDashboard({ onRefresh }) {
                             {row.selected_model}
                           </span>
                           <time className="analytics-conv__time">
-                            {formatDate(row.timestamp)}
+                            {row.timestamp}
                           </time>
                         </div>
                         <p className="analytics-conv__prompt">

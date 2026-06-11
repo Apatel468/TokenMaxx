@@ -1,66 +1,44 @@
 """
-Models router — exposes the catalog of AI models the router can choose from.
+Models router — exposes the Groq model catalog from model_registry.py.
 
-GET /models returns pricing, tiers, and strengths for each model.
-Useful for the frontend to show users what models exist and why.
+GET /models        → all routable models with metadata
+GET /models/sync   → refresh Groq API catalog and return sync summary
 """
 
 from fastapi import APIRouter
 
-from models import ModelInfo
-from services.cost_tracker import MODEL_PRICING
+from config.model_registry import cost_per_1k_tokens, tier_for_model
+from models import ModelInfo, ModelSyncSummary
+from services.groq_models import catalog_summary, get_routable_models, sync_groq_catalog
 
 router = APIRouter(prefix="/models", tags=["models"])
-
-# Extra metadata not stored in MODEL_PRICING
-_MODEL_METADATA: dict[str, dict] = {
-    "gpt-4o": {
-        "name": "GPT-4o",
-        "provider": "OpenAI",
-        "tier": "premium",
-        "strengths": ["complex reasoning", "coding", "multimodal"],
-        "avg_latency_ms": 2500,
-    },
-    "gpt-4o-mini": {
-        "name": "GPT-4o Mini",
-        "provider": "OpenAI",
-        "tier": "standard",
-        "strengths": ["coding", "instruction following", "good value"],
-        "avg_latency_ms": 1200,
-    },
-    "claude-3-haiku": {
-        "name": "Claude 3 Haiku",
-        "provider": "Anthropic",
-        "tier": "economy",
-        "strengths": ["summarization", "fast responses", "low cost"],
-        "avg_latency_ms": 800,
-    },
-    "gemini-flash": {
-        "name": "Gemini Flash",
-        "provider": "Google",
-        "tier": "economy",
-        "strengths": ["Q&A", "translation", "very low cost"],
-        "avg_latency_ms": 600,
-    },
-}
 
 
 @router.get("", response_model=list[ModelInfo])
 def list_models() -> list[ModelInfo]:
-    """Return all models available to the router."""
-    result = []
-    for model_id, pricing in MODEL_PRICING.items():
-        meta = _MODEL_METADATA[model_id]
+    """Return all routable Groq models with registry metadata."""
+    result: list[ModelInfo] = []
+    for record in get_routable_models():
+        meta = record.metadata
+        cost_in, cost_out = cost_per_1k_tokens(record.model_id, meta)
         result.append(
             ModelInfo(
-                id=model_id,
-                name=meta["name"],
+                id=record.model_id,
+                name=meta["model_name"],
                 provider=meta["provider"],
-                tier=meta["tier"],
-                cost_per_1k_input=pricing["input"],
-                cost_per_1k_output=pricing["output"],
+                tier=tier_for_model(record.model_id, meta),
+                cost_per_1k_input=cost_in,
+                cost_per_1k_output=cost_out,
                 strengths=meta["strengths"],
                 avg_latency_ms=meta["avg_latency_ms"],
             )
         )
     return result
+
+
+@router.get("/sync", response_model=ModelSyncSummary)
+def sync_models() -> ModelSyncSummary:
+    """Force-refresh the Groq API catalog and report registry gaps."""
+    sync_groq_catalog(force=True)
+    summary = catalog_summary()
+    return ModelSyncSummary(**summary)

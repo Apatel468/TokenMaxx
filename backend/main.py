@@ -29,7 +29,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import analytics, chat, conversations, models, settings
+from routers import (
+    admin,
+    analytics,
+    auth,
+    chat,
+    conversations,
+    model_settings_route,
+    models,
+    settings,
+)
 from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
@@ -71,7 +80,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount feature routers
+# Mount feature routers (auth is public; chat/analytics/etc. require JWT)
+app.include_router(auth.router)
+app.include_router(admin.router)
+app.include_router(model_settings_route.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(models.router)

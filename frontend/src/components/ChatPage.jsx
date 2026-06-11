@@ -258,7 +258,7 @@ function ChatPage({ onChatComplete }) {
 
                   {conv.message_count} msgs ·{" "}
 
-                  {new Date(conv.updated_at).toLocaleDateString()}
+                  {conv.updated_at}
 
                 </span>
 

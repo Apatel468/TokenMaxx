@@ -13,8 +13,9 @@ POST /chat pipeline:
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import User, get_db
 from models import ChatRequest, ChatResponse
+from services.auth_dependencies import get_current_user
 from services.model_settings import NoModelsEnabledError
 from services.context_builder import build_context
 from services.conversation_store import (
@@ -31,7 +32,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("", response_model=ChatResponse)
-def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+def chat(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ChatResponse:
     """
     Process a user prompt with optional conversation memory.
 
@@ -45,7 +50,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     # Step 1: Load existing thread (if continuing a conversation)
     prior_messages: list[dict] = []
     if request.conversation_id is not None:
-        get_conversation_or_404(db, request.conversation_id)
+        get_conversation_or_404(db, request.conversation_id, user=current_user)
         prior_messages = load_message_history(db, request.conversation_id)
 
     # Step 2: Classify the latest user message (Groq LLM, or keywords if unavailable)
@@ -56,7 +61,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     # Step 4: Score all enabled Groq models and pick the best
     try:
-        decision = route(context, db)
+        decision = route(context, db, current_user.id)
     except NoModelsEnabledError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -80,6 +85,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         decision=decision,
         model_response=model_response,
         costs=costs,
+        user_id=current_user.id,
         conversation_id=request.conversation_id,
         enhanced_prompt=context.enhanced_prompt,
         system_prompt=context.system_prompt,

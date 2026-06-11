@@ -1,22 +1,14 @@
 /**
  * Conversation API — list and load multi-turn threads.
  */
-import { API_BASE } from "./config.js";
-
-async function fetchJson(path) {
-  const response = await fetch(`${API_BASE}${path}`);
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  return response.json();
-}
+import { authFetch } from "./http.js";
 
 /** GET /conversations — list recent threads */
 export function fetchConversations(limit = 50) {
-  return fetchJson(`/conversations?limit=${limit}`);
+  return authFetch(`/conversations?limit=${limit}`);
 }
 
 /** GET /conversations/{id} — full message history */
 export function fetchConversation(conversationId) {
-  return fetchJson(`/conversations/${conversationId}`);
+  return authFetch(`/conversations/${conversationId}`);
 }

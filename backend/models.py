@@ -5,10 +5,59 @@ These models define the shape of data going in and out of the API.
 FastAPI uses them to validate requests and auto-generate OpenAPI docs.
 """
 
-from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
+
+
+# ---------------------------------------------------------------------------
+# Auth models
+# ---------------------------------------------------------------------------
+
+class SignupRequest(BaseModel):
+    """POST /auth/signup body."""
+
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+
+class LoginRequest(BaseModel):
+    """POST /auth/login body."""
+
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    """Public user profile (never includes password)."""
+
+    id: int
+    email: str
+    role: str
+    created_at: str = ""
+
+
+class AuthResponse(BaseModel):
+    """Returned after signup or login — includes JWT for the frontend."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class EmployeeUsageRecord(BaseModel):
+    """One employee row for the admin dashboard."""
+
+    user_id: int
+    email: str
+    total_chats: int
+    total_input_tokens: int
+    total_output_tokens: int
+    actual_cost: float
+    premium_baseline_cost: float
+    savings: float
+    savings_percentage: float
+    most_used_models: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +148,12 @@ class ModelControlItem(BaseModel):
     provider: str
     tier: str
     task_types: list[str]
+    admin_enabled: bool = True
+    user_enabled: bool = True
+    disabled_by_admin: bool = False
+    available: bool = True
     enabled: bool
+    toggle_enabled: bool = True
     cost_per_1k_input: float
     cost_per_1k_output: float
 
@@ -108,7 +162,7 @@ class ModelControlToggle(BaseModel):
     """Single enable/disable change from Model Controls."""
 
     model_id: str
-    enabled: bool
+    enabled: bool = True
 
 
 class ModelControlsUpdate(BaseModel):
@@ -166,10 +220,9 @@ class HistoryRecord(BaseModel):
     actual_cost: float
     premium_cost: float
     savings_percentage: float
-    timestamp: datetime
-
-    class Config:
-        from_attributes = True
+    timestamp: str = Field(
+        description="Request time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
 
 
 class ConversationRecord(BaseModel):
@@ -188,10 +241,9 @@ class ConversationRecord(BaseModel):
     savings: float
     savings_percentage: float
     latency_ms: float
-    timestamp: datetime
-
-    class Config:
-        from_attributes = True
+    timestamp: str = Field(
+        description="Request time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
 
 
 class ModelUsageRecord(BaseModel):
@@ -215,10 +267,9 @@ class MessageOut(BaseModel):
     id: int
     role: str
     content: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: str = Field(
+        description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
 
 
 class ConversationListItem(BaseModel):
@@ -228,11 +279,12 @@ class ConversationListItem(BaseModel):
     title: str = ""
     preview: str
     message_count: int
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: str = Field(
+        description="Created time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
+    updated_at: str = Field(
+        description="Last activity in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
 
 
 class ConversationDetail(BaseModel):
@@ -241,8 +293,9 @@ class ConversationDetail(BaseModel):
     id: int
     title: str = ""
     messages: list[MessageOut]
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: str = Field(
+        description="Created time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )
+    updated_at: str = Field(
+        description="Last activity in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
+    )

@@ -1,32 +1,39 @@
 """
-Settings router — Model Controls API.
+Settings router — legacy /settings/models aliases redirect logic to /model-settings.
 
-GET  /settings/models  → list routable models with enable/disable state
-PUT  /settings/models  → update which models the router may use
+Prefer GET/PUT /model-settings for Model Controls.
 """
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import User, get_db
 from models import ModelControlItem, ModelControlsUpdate
-from services.model_settings import list_model_controls, update_model_controls
+from services.auth_dependencies import get_current_user
+from services.model_settings import list_model_settings, save_model_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 @router.get("/models", response_model=list[ModelControlItem])
-def get_model_controls(db: Session = Depends(get_db)) -> list[ModelControlItem]:
-    """Return all routable models and their enabled state for Model Controls."""
-    return [ModelControlItem(**row) for row in list_model_controls(db)]
+def get_model_controls_legacy(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ModelControlItem]:
+    """Legacy alias for GET /model-settings."""
+    is_admin = current_user.role == "admin"
+    rows = list_model_settings(db, current_user.id, is_admin=is_admin)
+    return [ModelControlItem(**row) for row in rows]
 
 
 @router.put("/models", response_model=list[ModelControlItem])
-def put_model_controls(
+def put_model_controls_legacy(
     body: ModelControlsUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[ModelControlItem]:
-    """Save enable/disable toggles from the Model Controls UI."""
+    """Legacy alias for PUT /model-settings."""
+    is_admin = current_user.role == "admin"
     updates = [item.model_dump() for item in body.models]
-    rows = update_model_controls(db, updates)
+    rows = save_model_settings(db, current_user.id, updates, is_admin=is_admin)
     return [ModelControlItem(**row) for row in rows]

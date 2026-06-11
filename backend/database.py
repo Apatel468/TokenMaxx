@@ -41,6 +41,28 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """
+    Registered TokenMaxx account.
+
+    role is either "user" (see own chats) or "admin" (see all usage metrics).
+    """
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default="user")
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    conversations = relationship("Conversation", back_populates="owner")
+
+
 class Conversation(Base):
     """
     A single chat exchange (one user prompt + one AI reply).
@@ -51,6 +73,8 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Owner of this chat thread — null only for legacy rows before auth was added
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -65,6 +89,7 @@ class Conversation(Base):
     # Title from first user + assistant exchange (generated once after first reply)
     title = Column(String(200), nullable=True)
 
+    owner = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation")
     model_runs = relationship("ModelRun", back_populates="conversation")
 
@@ -93,15 +118,15 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
 
 
-class ModelSetting(Base):
+class AdminModelSetting(Base):
     """
-    User preference for whether a routable Groq model is enabled.
+    Organization-wide model toggle (admin Model Controls).
 
-    One row per unique model id from models.yaml. Disabled models are
-    skipped by the router (with fallback to the next enabled option).
+    When disabled here, the model is off for every user regardless of
+    their personal preferences.
     """
 
-    __tablename__ = "model_settings"
+    __tablename__ = "admin_model_settings"
 
     model_id = Column(String(100), primary_key=True)
     enabled = Column(Boolean, nullable=False, default=True)
@@ -111,6 +136,31 @@ class ModelSetting(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class UserModelSetting(Base):
+    """
+    Per-user model preference on top of admin settings.
+
+    Effective availability: admin_model_settings.enabled AND user_model_settings.enabled
+  (missing row defaults to enabled for the user).
+    """
+
+    __tablename__ = "user_model_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    model_id = Column(String(100), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+# Backward-compatible alias used in older imports
+ModelSetting = AdminModelSetting
 
 
 class ModelRun(Base):
@@ -126,6 +176,8 @@ class ModelRun(Base):
     conversation_id = Column(
         Integer, ForeignKey("conversations.id"), nullable=False, index=True
     )
+    # Copied from conversation.user_id for fast admin usage reports
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     assistant_message_id = Column(
         Integer, ForeignKey("messages.id"), nullable=True
     )
@@ -188,16 +240,43 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_model_runs_columns()
     _migrate_conversations_columns()
+    _migrate_auth_columns()
+    _migrate_model_settings_tables()
     _seed_model_settings()
+    _seed_admin_user()
+
+
+def _migrate_model_settings_tables() -> None:
+    """
+    Rename legacy model_settings → admin_model_settings and create user_model_settings.
+    """
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+        if "model_settings" in tables and "admin_model_settings" not in tables:
+            try:
+                conn.execute(
+                    text("ALTER TABLE model_settings RENAME TO admin_model_settings")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+        if "user_model_settings" not in tables:
+            Base.metadata.tables["user_model_settings"].create(bind=conn, checkfirst=True)
+            conn.commit()
 
 
 def _seed_model_settings() -> None:
-    """Insert default enabled rows for every routable model."""
-    from services.model_settings import seed_model_settings
+    """Insert default enabled rows for every routable model (admin layer)."""
+    from services.model_settings import seed_admin_model_settings
 
     db = SessionLocal()
     try:
-        seed_model_settings(db)
+        seed_admin_model_settings(db)
     finally:
         db.close()
 
@@ -231,6 +310,38 @@ def _migrate_model_runs_columns() -> None:
 def _table_has_column(conn, table: str, column: str) -> bool:
     rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
     return any(row[1] == column for row in rows)
+
+
+def _migrate_auth_columns() -> None:
+    """Add user_id to conversations and model_runs for per-user chat isolation."""
+    with engine.connect() as conn:
+        if not _table_has_column(conn, "conversations", "user_id"):
+            try:
+                conn.execute(
+                    text("ALTER TABLE conversations ADD COLUMN user_id INTEGER")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+        if not _table_has_column(conn, "model_runs", "user_id"):
+            try:
+                conn.execute(
+                    text("ALTER TABLE model_runs ADD COLUMN user_id INTEGER")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _seed_admin_user() -> None:
+    """Optional first admin from ADMIN_EMAIL + ADMIN_PASSWORD in .env."""
+    from services.auth_service import ensure_seed_admin
+
+    db = SessionLocal()
+    try:
+        ensure_seed_admin(db)
+    finally:
+        db.close()
 
 
 def _migrate_conversations_columns() -> None:
