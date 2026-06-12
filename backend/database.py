@@ -61,6 +61,30 @@ class User(Base):
     )
 
     conversations = relationship("Conversation", back_populates="owner")
+    preferences = relationship(
+        "UserPreference", back_populates="user", uselist=False
+    )
+
+
+class UserPreference(Base):
+    """
+    Per-user app settings (prompt enhancement, future toggles).
+
+    Missing row defaults: enhance_prompts=True.
+    """
+
+    __tablename__ = "user_preferences"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    enhance_prompts = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="preferences")
 
 
 class Conversation(Base):
@@ -109,6 +133,8 @@ class Message(Base):
     )
     role = Column(String(20), nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    # Assistant only: "Router Selected" | "User Selected Model"
+    response_label = Column(String(40), nullable=True)
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -205,6 +231,15 @@ class ModelRun(Base):
     enhanced_prompt = Column(Text, nullable=True)
     system_prompt = Column(Text, nullable=True)
     enhancement_reason = Column(Text, nullable=True)
+    enhancement_method = Column(String(30), nullable=True)
+    enhancement_enabled = Column(Boolean, nullable=False, default=True)
+    enhancement_cost_saved = Column(Float, nullable=False, default=0.0)
+
+    # Regeneration tracking
+    is_regeneration = Column(Boolean, nullable=False, default=False)
+    original_model = Column(String(100), nullable=True)
+    regenerated_model = Column(String(100), nullable=True)
+    turn_user_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
 
     created_at = Column(
         DateTime,
@@ -242,6 +277,9 @@ def init_db() -> None:
     _migrate_conversations_columns()
     _migrate_auth_columns()
     _migrate_model_settings_tables()
+    _migrate_user_preferences_table()
+    _migrate_model_runs_enhancement_columns()
+    _migrate_regeneration_columns()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -279,6 +317,74 @@ def _seed_model_settings() -> None:
         seed_admin_model_settings(db)
     finally:
         db.close()
+
+
+def _migrate_user_preferences_table() -> None:
+    """Create user_preferences table for per-account settings."""
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+        if "user_preferences" not in tables:
+            Base.metadata.tables["user_preferences"].create(bind=conn, checkfirst=True)
+            conn.commit()
+
+
+def _migrate_model_runs_enhancement_columns() -> None:
+    """Add enhancement analytics columns to model_runs."""
+    new_columns = (
+        ("enhancement_method", "VARCHAR(30)"),
+        ("enhancement_enabled", "BOOLEAN DEFAULT 1"),
+        ("enhancement_cost_saved", "FLOAT DEFAULT 0.0"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_regeneration_columns() -> None:
+    """Add regeneration and message label columns."""
+    message_cols = (("response_label", "VARCHAR(40)"),)
+    run_cols = (
+        ("is_regeneration", "BOOLEAN DEFAULT 0"),
+        ("original_model", "VARCHAR(100)"),
+        ("regenerated_model", "VARCHAR(100)"),
+        ("turn_user_message_id", "INTEGER"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in message_cols:
+            if _table_has_column(conn, "messages", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE messages ADD COLUMN {column_name} {column_type}")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+        for column_name, column_type in run_cols:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
 
 
 def _migrate_model_runs_columns() -> None:

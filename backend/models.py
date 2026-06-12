@@ -35,6 +35,19 @@ class UserOut(BaseModel):
     email: str
     role: str
     created_at: str = ""
+    enhance_prompts: bool = True
+
+
+class UserPreferencesOut(BaseModel):
+    """GET/PUT /user/preferences response."""
+
+    enhance_prompts: bool = True
+
+
+class UserPreferencesUpdate(BaseModel):
+    """PUT /user/preferences body."""
+
+    enhance_prompts: bool
 
 
 class AuthResponse(BaseModel):
@@ -64,6 +77,39 @@ class EmployeeUsageRecord(BaseModel):
 # Chat endpoint models
 # ---------------------------------------------------------------------------
 
+class RegenerateRequest(BaseModel):
+    """POST /chat/regenerate — retry with a user-chosen model."""
+
+    conversation_id: int
+    message_id: int = Field(
+        description="User message id for the turn being regenerated.",
+    )
+    model_id: str = Field(min_length=1)
+
+
+class RegenerateResponse(BaseModel):
+    """Response after regenerating with a user-selected model."""
+
+    response: str
+    model_used: str
+    actual_cost: float
+    latency_ms: float
+    assistant_message_id: int
+    response_label: str = "User Selected Model"
+
+
+class ModelRecommendation(BaseModel):
+    """One ranked model in the top-5 recommendation list."""
+
+    model_id: str
+    provider: str
+    ranking_score: float
+    estimated_cost: float
+    estimated_latency: float
+    available: bool = True
+    disabled_reason: str = ""
+
+
 class ChatRequest(BaseModel):
     """What the client sends when calling POST /chat."""
 
@@ -77,6 +123,10 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[int] = Field(
         default=None,
         description="Existing conversation id to append this message to.",
+    )
+    enhance_prompt: bool = Field(
+        default=True,
+        description="When false, skip prompt enhancement and send the original prompt.",
     )
 
 
@@ -92,8 +142,9 @@ class ChatResponse(BaseModel):
     enhanced_prompt: str = Field(
         description="Task-wrapped prompt sent to the LLM (user intent preserved)."
     )
-    system_prompt: str = Field(
-        description="System instructions applied for this task type."
+    system_prompt: Optional[str] = Field(
+        default="",
+        description="System instructions applied for this task type (empty when enhancement disabled).",
     )
     enhancement_reason: str = Field(
         description="Short explanation of what enhancement rules were applied."
@@ -132,8 +183,15 @@ class ChatResponse(BaseModel):
     )
     candidate_models: list[dict] = Field(
         default_factory=list,
-        description="All scored candidates: model_id, score, task_match, etc.",
+        description="Legacy full scored list (all candidates).",
     )
+    top_recommendations: list[ModelRecommendation] = Field(
+        default_factory=list,
+        description="Top 5 ranked models with cost/latency estimates and availability.",
+    )
+    selected_model_id: str = ""
+    user_message_id: int = 0
+    assistant_message_id: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +264,10 @@ class AnalyticsSummary(BaseModel):
     premium_baseline_cost: float
     total_savings: float
     savings_percentage: float
+    enhancement_enabled_count: int = 0
+    enhancement_disabled_count: int = 0
+    enhancement_cost_saved: float = 0.0
+    regeneration_count: int = 0
 
 
 class HistoryRecord(BaseModel):
@@ -220,6 +282,8 @@ class HistoryRecord(BaseModel):
     actual_cost: float
     premium_cost: float
     savings_percentage: float
+    enhancement_enabled: bool = True
+    enhancement_method: str = ""
     timestamp: str = Field(
         description="Request time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
     )
@@ -267,6 +331,11 @@ class MessageOut(BaseModel):
     id: int
     role: str
     content: str
+    response_label: str = ""
+    selected_model: str = Field(
+        default="",
+        description="Model used for regenerated assistant replies (empty otherwise).",
+    )
     created_at: str = Field(
         description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
     )

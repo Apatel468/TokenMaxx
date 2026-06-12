@@ -74,6 +74,7 @@ def route(context: PromptContext, db: Session, user_id: int) -> RoutingDecision:
             "Check Model Controls or contact an admin."
         )
 
+    # Score only allowlisted chat models (catalog is already allowlist-filtered)
     all_scored = score_candidates(context.task_type, catalog)
     candidate_dicts = [c.to_dict() for c in all_scored]
 

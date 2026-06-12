@@ -2,17 +2,18 @@
 
 **Maximum Intelligence, Minimum Cost**
 
-TokenMaxx routes user prompts to the most cost-effective Groq model for each task, engineers prompts for better results, and tracks savings versus a premium baseline (GPT-4o).
+TokenMaxx routes user prompts to the most cost-effective Groq model for each task, optionally engineers prompts for better results, and tracks savings versus a premium baseline (GPT-4o).
 
 ## Features
 
-- **Dynamic routing** — scores all Groq models via `model_registry.py` + composite formula
-- **Model Controls** — admins set org-wide toggles; users set personal preferences; intelligent fallback when preferred model is off
+- **Dynamic routing** — scores 6 allowlisted Groq chat models via composite formula
+- **Model regenerate** — click any top-5 recommendation to retry with a different model (one API call per click)
+- **Model Controls** — admin org-wide toggles + user personal preferences; intelligent fallback
+- **Prompt Enhancement toggle** — user-controlled; skip enhancer to save cost/latency
 - **Authentication** — JWT signup/login; per-user conversations and analytics
-- **Admin dashboard** — employee usage metrics and cost breakdown (admin role)
-- AI prompt engineering with rule-based fallback
+- **Admin dashboard** — employee usage metrics and cost breakdown
 - Multi-turn conversations with auto-generated titles
-- Real-time analytics: cost, savings, model usage, and routing scores
+- Analytics: cost, savings, model usage, and routing scores
 
 ## Quick Start
 
@@ -28,7 +29,6 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 cd backend
 python -m venv venv
 venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
 copy .env.example .env         # add GROQ_API_KEY, JWT_SECRET
 uvicorn main:app --reload --port 8001
@@ -49,8 +49,6 @@ npm run dev
 | App | http://localhost:5173 |
 | API docs | http://127.0.0.1:8001/docs |
 | Health | http://127.0.0.1:8001/health |
-
-Sign up or log in at the app. Optional: set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` to seed an admin account on startup.
 
 ## Repository
 

@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 
 from config.model_registry import cost_per_1k_tokens
-from services.config_loader import get_premium_baseline
+from services.config_loader import get_auxiliary_model, get_premium_baseline
 from services.context_builder import PromptContext
 from services.model_clients import ModelResponse
 
@@ -79,6 +79,27 @@ def estimate_costs(
         savings_percentage=round(savings, 2),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+    )
+
+
+_CHARS_PER_TOKEN = 4
+_ESTIMATED_ENHANCER_OUTPUT_TOKENS = 120
+
+
+def estimate_enhancement_cost_saved(prompt: str) -> float:
+    """
+    Estimate USD saved by skipping the enhancer Groq call.
+
+    Uses the auxiliary enhancer model rates and prompt-length token estimate.
+    """
+    enhancer_id = get_auxiliary_model("enhancer")
+    input_per_1k, output_per_1k = _get_model_rates(enhancer_id)
+    input_tokens = max(len(prompt) // _CHARS_PER_TOKEN, 1)
+    return _calculate_cost(
+        input_per_1k,
+        output_per_1k,
+        input_tokens,
+        _ESTIMATED_ENHANCER_OUTPUT_TOKENS,
     )
 
 

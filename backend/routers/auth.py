@@ -19,21 +19,24 @@ from services.timezone_utils import format_timestamp_eastern
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_out(user: User) -> UserOut:
+def _user_out(user: User, db: Session) -> UserOut:
+    from services.user_preferences import get_enhance_prompts
+
     return UserOut(
         id=user.id,
         email=user.email,
         role=user.role,
         created_at=format_timestamp_eastern(user.created_at),
+        enhance_prompts=get_enhance_prompts(db, user.id),
     )
 
 
-def _auth_response(user: User) -> AuthResponse:
+def _auth_response(user: User, db: Session) -> AuthResponse:
     token = create_access_token(user.id, user.email, user.role)
     return AuthResponse(
         access_token=token,
         token_type="bearer",
-        user=_user_out(user),
+        user=_user_out(user, db),
     )
 
 
@@ -41,14 +44,14 @@ def _auth_response(user: User) -> AuthResponse:
 def signup(body: SignupRequest, db: Session = Depends(get_db)) -> AuthResponse:
     """Register a new user and return a JWT so they are logged in immediately."""
     user = register_user(db, body.email, body.password, role="user")
-    return _auth_response(user)
+    return _auth_response(user, db)
 
 
 @router.post("/login", response_model=AuthResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     """Verify email/password and return a JWT session token."""
     user = authenticate_user(db, body.email, body.password)
-    return _auth_response(user)
+    return _auth_response(user, db)
 
 
 @router.post("/logout")
@@ -62,6 +65,9 @@ def logout() -> dict:
 
 
 @router.get("/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user)) -> UserOut:
+def me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserOut:
     """Return the logged-in user's profile (validates the JWT)."""
-    return _user_out(current_user)
+    return _user_out(current_user, db)

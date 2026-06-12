@@ -1,14 +1,14 @@
 # TokenMaxx routing config — read by services/config_loader.py
 #
-# Model selection is DYNAMIC: the router scores ALL routable Groq models
-# using metadata in config/model_registry.py (not hardcoded per task).
+# Chat models are restricted to GROQ_CHAT_MODEL_IDS in model_registry.py
+# (6 Groq chat models + whisper-large-v3 for audio only).
 #
 # This file defines:
 #   - task_profiles: how to weight capability scores per task type
 #   - auxiliary: lightweight models for enhancer / title / classifier
 #   - premium_baseline: savings comparison reference
 #
-# To add a new Groq chat model: edit model_registry.py only.
+# To change which Groq models are available: edit GROQ_MODEL_ALLOWLIST in model_registry.py.
 
 # Task types the prompt analyzer may assign (keys must match task_profiles)
 default_task: general_qa

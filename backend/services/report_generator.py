@@ -40,6 +40,10 @@ def generate_analytics_summary(db: Session, user_id: int) -> AnalyticsSummary:
             premium_baseline_cost=0.0,
             total_savings=0.0,
             savings_percentage=0.0,
+            enhancement_enabled_count=0,
+            enhancement_disabled_count=0,
+            enhancement_cost_saved=0.0,
+            regeneration_count=0,
         )
 
     total_cost = sum(r.estimated_cost for r in runs)
@@ -51,12 +55,23 @@ def generate_analytics_summary(db: Session, user_id: int) -> AnalyticsSummary:
     else:
         savings_percentage = 0.0
 
+    enabled_count = sum(1 for r in runs if getattr(r, "enhancement_enabled", True))
+    disabled_count = len(runs) - enabled_count
+    enhancement_cost_saved = sum(
+        getattr(r, "enhancement_cost_saved", 0.0) or 0.0 for r in runs
+    )
+    regeneration_count = sum(1 for r in runs if getattr(r, "is_regeneration", False))
+
     return AnalyticsSummary(
         total_chats=len(runs),
         total_cost=round(total_cost, 6),
         premium_baseline_cost=round(premium_baseline_cost, 6),
         total_savings=round(total_savings, 6),
         savings_percentage=round(savings_percentage, 2),
+        enhancement_enabled_count=enabled_count,
+        enhancement_disabled_count=disabled_count,
+        enhancement_cost_saved=round(enhancement_cost_saved, 6),
+        regeneration_count=regeneration_count,
     )
 
 
@@ -154,6 +169,8 @@ def get_history(db: Session, user_id: int, limit: int = 20) -> list[HistoryRecor
                 actual_cost=run.estimated_cost,
                 premium_cost=run.premium_model_cost,
                 savings_percentage=run.savings_percentage,
+                enhancement_enabled=bool(getattr(run, "enhancement_enabled", True)),
+                enhancement_method=run.enhancement_method or "",
                 timestamp=format_timestamp_eastern(run.created_at),
             )
         )

@@ -3,6 +3,7 @@
  * available = admin_enabled && user_enabled
  */
 import { useCallback, useEffect, useState } from "react";
+import { savePreferences } from "../api/preferences.js";
 import {
   fetchModelControls,
   normalizeModelRow,
@@ -15,11 +16,17 @@ function tierLabel(tier) {
   return tier;
 }
 
-function ModelControls({ isAdmin = false }) {
+function ModelControls({
+  isAdmin = false,
+  enhancePrompts = true,
+  onEnhancePromptsChange,
+}) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [prefSaving, setPrefSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [prefError, setPrefError] = useState(null);
   const [saved, setSaved] = useState(false);
 
   const load = useCallback(async () => {
@@ -63,6 +70,20 @@ function ModelControls({ isAdmin = false }) {
     );
   }
 
+  async function handleEnhanceToggle() {
+    const next = !enhancePrompts;
+    setPrefSaving(true);
+    setPrefError(null);
+    try {
+      const result = await savePreferences({ enhance_prompts: next });
+      onEnhancePromptsChange?.(result.enhance_prompts ?? next);
+    } catch (err) {
+      setPrefError(err.message || "Could not save preference.");
+    } finally {
+      setPrefSaving(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setError(null);
@@ -104,9 +125,32 @@ function ModelControls({ isAdmin = false }) {
       </header>
 
       {error && <div className="alert alert--error">{error}</div>}
+      {prefError && <div className="alert alert--error">{prefError}</div>}
       {saved && (
         <div className="alert alert--success">Model preferences saved.</div>
       )}
+
+      <section className="preference-card">
+        <div className="preference-card__info">
+          <h3 className="preference-card__title">Prompt Enhancement</h3>
+          <p className="preference-card__desc">
+            Improve prompts before routing. May increase quality but adds cost
+            and latency.
+          </p>
+        </div>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={enhancePrompts}
+            disabled={prefSaving}
+            onChange={handleEnhanceToggle}
+          />
+          <span className="toggle-switch__track" />
+          <span className="toggle-switch__label">
+            {prefSaving ? "Saving…" : enhancePrompts ? "ON" : "OFF"}
+          </span>
+        </label>
+      </section>
 
       {loading ? (
         <div className="settings-loading">

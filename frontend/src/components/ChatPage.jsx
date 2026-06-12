@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { sendChat } from "../api/chat.js";
+import { regenerateChat, sendChat } from "../api/chat.js";
 
 import { fetchConversation, fetchConversations } from "../api/conversations.js";
 
@@ -22,7 +22,7 @@ import { resolveChatTitle, resolveSidebarTitle } from "../utils/conversationTitl
 
 
 
-function ChatPage({ onChatComplete }) {
+function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
   const [conversationId, setConversationId] = useState(null);
 
@@ -37,6 +37,8 @@ function ChatPage({ onChatComplete }) {
   const [result, setResult] = useState(null);
 
   const [loading, setLoading] = useState(false);
+
+  const [regeneratingModel, setRegeneratingModel] = useState(null);
 
   const [error, setError] = useState(null);
 
@@ -164,7 +166,7 @@ function ChatPage({ onChatComplete }) {
 
     try {
 
-      const data = await sendChat(trimmed, conversationId);
+      const data = await sendChat(trimmed, conversationId, enhancePrompts);
 
       setConversationId(data.conversation_id);
 
@@ -201,6 +203,42 @@ function ChatPage({ onChatComplete }) {
     }
 
   }
+
+
+
+  async function handleRegenerate(modelId) {
+    if (!result?.conversation_id || !result?.user_message_id) return;
+    if (regeneratingModel || loading) return;
+
+    setRegeneratingModel(modelId);
+    setError(null);
+
+    try {
+      await regenerateChat(result.conversation_id, result.user_message_id, modelId);
+      const detail = await fetchConversation(result.conversation_id);
+      setMessages(detail.messages);
+      if (onChatComplete) onChatComplete();
+    } catch (err) {
+      setError(err.message || "Could not regenerate with that model.");
+    } finally {
+      setRegeneratingModel(null);
+    }
+  }
+
+
+
+  const recommendations =
+    result?.top_recommendations?.length > 0
+      ? result.top_recommendations
+      : (result?.candidate_models || []).slice(0, 5).map((c) => ({
+          model_id: c.model_id,
+          provider: c.provider || "groq",
+          ranking_score: c.score ?? c.ranking_score ?? 0,
+          estimated_cost: c.estimated_cost ?? 0,
+          estimated_latency: c.estimated_latency ?? 0,
+          available: c.available !== false,
+          disabled_reason: c.disabled_reason || "",
+        }));
 
 
 
@@ -291,7 +329,14 @@ function ChatPage({ onChatComplete }) {
 
             )}
 
-            {messages.map((msg) => (
+            {messages.map((msg) => {
+
+              const isRegenerated =
+                msg.role === "assistant" &&
+                msg.response_label === "User Selected Model" &&
+                msg.selected_model;
+
+              return (
 
               <div
 
@@ -301,17 +346,32 @@ function ChatPage({ onChatComplete }) {
 
               >
 
-                <span className="thread-msg__role">
-
-                  {msg.role === "user" ? "You" : "Assistant"}
-
-                </span>
-
-                <p className="thread-msg__text">{msg.content}</p>
+                {msg.role === "user" ? (
+                  <>
+                    <span className="thread-msg__role">You</span>
+                    <p className="thread-msg__text">{msg.content}</p>
+                  </>
+                ) : isRegenerated ? (
+                  <>
+                    <p className="thread-msg__model-switch">
+                      User switched model to &ldquo;{msg.selected_model}&rdquo;
+                    </p>
+                    <p className="thread-msg__text">{msg.content}</p>
+                  </>
+                ) : (
+                  <>
+                    <span className="thread-msg__role">
+                      {msg.response_label || "Assistant"}
+                    </span>
+                    <p className="thread-msg__text">{msg.content}</p>
+                  </>
+                )}
 
               </div>
 
-            ))}
+            );
+
+            })}
 
             {loading && (
 
@@ -431,6 +491,18 @@ function ChatPage({ onChatComplete }) {
 
                     </div>
 
+                    <div className="stat-card">
+
+                      <span className="stat-card__label">Enhancement</span>
+
+                      <span className="stat-card__value">
+
+                        {result.enhancement_method === "disabled" ? "OFF" : "ON"}
+
+                      </span>
+
+                    </div>
+
                     {result.routing_score > 0 && (
 
                       <div className="stat-card">
@@ -449,35 +521,102 @@ function ChatPage({ onChatComplete }) {
 
                   </div>
 
-                  {result.candidate_models?.length > 1 && (
+                  {recommendations.length > 0 && (
 
-                    <div className="candidate-models">
+                    <div className="model-recommendations">
 
-                      <span className="candidate-models__label">Top candidates</span>
+                      <span className="model-recommendations__label">
 
-                      <ul className="candidate-models__list">
+                        Regenerate with another model
 
-                        {result.candidate_models.slice(0, 5).map((c) => (
+                      </span>
 
-                          <li key={c.model_id} className="candidate-models__item">
+                      <p className="model-recommendations__hint">
 
-                            <span className="candidate-models__name">
+                        Click a model to generate a new response (one call per click).
 
-                              {c.model_name || c.model_id}
+                      </p>
 
-                            </span>
+                      <div className="model-recommendations__chips">
 
-                            <span className="candidate-models__score">
+                        {recommendations.map((rec) => {
 
-                              {c.score}
+                          const isSelected =
+                            rec.model_id === result.selected_model_id;
 
-                            </span>
+                          const isDisabled = !rec.available;
 
-                          </li>
+                          const isLoading = regeneratingModel === rec.model_id;
 
-                        ))}
+                          return (
 
-                      </ul>
+                            <button
+
+                              key={rec.model_id}
+
+                              type="button"
+
+                              className={`model-chip ${
+
+                                isSelected ? "model-chip--selected" : ""
+
+                              } ${isDisabled ? "model-chip--disabled" : ""}`}
+
+                              disabled={
+
+                                isDisabled || !!regeneratingModel || loading
+
+                              }
+
+                              title={
+
+                                isDisabled
+
+                                  ? rec.disabled_reason
+
+                                  : `Score ${rec.ranking_score.toFixed(1)} · ~$${Number(rec.estimated_cost).toFixed(6)} · ~${Math.round(rec.estimated_latency)}ms`
+
+                              }
+
+                              onClick={() => handleRegenerate(rec.model_id)}
+
+                            >
+
+                              <span className="model-chip__id">
+
+                                {rec.model_id}
+
+                              </span>
+
+                              {isSelected && (
+
+                                <span className="model-chip__badge">Router</span>
+
+                              )}
+
+                              {isLoading && (
+
+                                <span className="model-chip__loading">…</span>
+
+                              )}
+
+                              {isDisabled && (
+
+                                <span className="model-chip__lock">
+
+                                  {rec.disabled_reason}
+
+                                </span>
+
+                              )}
+
+                            </button>
+
+                          );
+
+                        })}
+
+                      </div>
 
                     </div>
 

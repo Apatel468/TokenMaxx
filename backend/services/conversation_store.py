@@ -18,6 +18,23 @@ from services.conversation_title import generate_conversation_title
 from services.timezone_utils import format_timestamp_eastern
 from services.router_engine import RoutingDecision
 
+ROUTER_LABEL = "Router Selected"
+REGENERATE_LABEL = "User Selected Model"
+
+
+def _selected_model_for_message(db: Session, message: Message) -> str:
+    """Model id for a regenerated assistant message, linked via model_runs."""
+    if message.role != "assistant" or message.response_label != REGENERATE_LABEL:
+        return ""
+    run = (
+        db.query(ModelRun)
+        .filter(ModelRun.assistant_message_id == message.id)
+        .first()
+    )
+    if not run:
+        return ""
+    return run.regenerated_model or run.selected_model or ""
+
 
 def _user_owns_conversation(conversation: Conversation, user: User) -> bool:
     """True when this user may read/write the conversation (admins use /admin for org-wide data)."""
@@ -139,8 +156,11 @@ def save_chat_turn(
     enhanced_prompt: str = "",
     system_prompt: str = "",
     enhancement_reason: str = "",
-) -> tuple[int, str | None]:
-    """Save one user message + assistant reply (+ model_run) for user_id."""
+    enhancement_method: str = "",
+    enhancement_enabled: bool = True,
+    enhancement_cost_saved: float = 0.0,
+) -> tuple[int, str | None, int, int]:
+    """Save one user message + assistant reply (+ model_run). Returns ids."""
     if conversation_id:
         conversation = get_conversation_or_404(db, conversation_id)
         if conversation.user_id is not None and conversation.user_id != user_id:
@@ -164,6 +184,7 @@ def save_chat_turn(
         conversation_id=conversation.id,
         role="assistant",
         content=response_text,
+        response_label=ROUTER_LABEL,
     )
     db.add(assistant_message)
     db.flush()
@@ -187,6 +208,10 @@ def save_chat_turn(
         enhanced_prompt=enhanced_prompt,
         system_prompt=system_prompt,
         enhancement_reason=enhancement_reason,
+        enhancement_method=enhancement_method,
+        enhancement_enabled=enhancement_enabled,
+        enhancement_cost_saved=round(enhancement_cost_saved, 6),
+        turn_user_message_id=user_message.id,
     )
     db.add(model_run)
 
@@ -199,7 +224,7 @@ def save_chat_turn(
     db.commit()
     db.refresh(conversation)
 
-    return conversation.id, conversation.title or title
+    return conversation.id, conversation.title or title, user_message.id, assistant_message.id
 
 
 def list_conversations(
@@ -260,6 +285,8 @@ def get_conversation_detail(
                 id=m.id,
                 role=m.role,
                 content=m.content,
+                response_label=m.response_label or "",
+                selected_model=_selected_model_for_message(db, m),
                 created_at=format_timestamp_eastern(m.created_at),
             )
             for m in messages

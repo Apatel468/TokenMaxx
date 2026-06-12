@@ -1,13 +1,13 @@
 # TokenMaxx — System Design
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.3.1 · **Last updated:** June 2026
+> **Version:** 0.3.2 · **Last updated:** June 2026
 
 ---
 
 ## Overview
 
-TokenMaxx is a two-tier web application that optimizes LLM spend by scoring every available Groq model for each task, respecting org-wide and per-user enable/disable preferences, authenticating users with JWT, enhancing prompts before inference, and reporting cost savings against a premium baseline.
+TokenMaxx is a two-tier web application that optimizes LLM spend by scoring allowlisted Groq chat models per task, respecting org-wide and per-user toggles, optionally enhancing prompts, letting users regenerate with another model on demand, and reporting savings vs. a GPT-4o baseline.
 
 ---
 
@@ -15,30 +15,34 @@ TokenMaxx is a two-tier web application that optimizes LLM spend by scoring ever
 
 | Layer | Technology | Responsibility |
 |-------|------------|----------------|
-| Frontend | React + Vite | Auth UI, chat, analytics, model controls, admin dashboard |
-| API | FastAPI | `/auth`, `/chat`, `/conversations`, `/analytics`, `/model-settings`, `/admin` |
-| Services | Python modules | Auth, classify, enhance, score, route, generate, track cost |
-| Data | SQLite | Users, conversations, messages, model runs, model settings |
-| External | Groq via LiteLLM | LLM inference + model catalog API |
+| Frontend | React + Vite | Auth, chat, regenerate UI, analytics, settings |
+| API | FastAPI | `/auth`, `/chat`, `/chat/regenerate`, `/user/preferences`, `/model-settings` |
+| Services | Python | Classify, enhance (optional), score, route, regenerate, track cost |
+| Data | SQLite | Users, preferences, conversations, model runs, settings |
+| External | Groq via LiteLLM | Inference on allowlisted models |
 
 ---
 
-## Request Flow
+## Request Flow (new chat)
 
 ```
-User signs up / logs in → JWT stored client-side
-User prompt [Bearer token]
-  → authenticate user
-  → classify (keyword rules)
-  → enhance prompt (Groq AI or rules)
-  → sync Groq catalog + filter available models (admin ∩ user prefs)
-  → score all candidates (registry metadata + task profile)
-  → pick highest-scoring available model
-  → generate response (Groq)
-  → clean response
-  → estimate costs vs GPT-4o baseline
-  → persist turn + title (first reply), scoped to user_id
-  → return ChatResponse with score + candidates
+Login → JWT stored
+POST /chat { prompt, enhance_prompt? }
+  → classify (keywords)
+  → enhance if user preference enabled
+  → score allowlisted available models
+  → pick best → generate → persist ("Router Selected")
+  → return top_recommendations for UI chips
+```
+
+## Request Flow (regenerate)
+
+```
+User clicks model chip in routing panel
+POST /chat/regenerate { conversation_id, message_id, model_id }
+  → reuse stored prompts (no classify/enhance/route)
+  → single generate call
+  → append message: "User switched model to …"
 ```
 
 ---
@@ -47,24 +51,29 @@ User prompt [Bearer token]
 
 | Source | Contents |
 |--------|----------|
-| `model_registry.py` | Model metadata, capability scores, pricing, latency |
-| `models.yaml` | Task profile weights, auxiliary models, premium baseline |
-| SQLite `admin_model_settings` | Org-wide enabled flag per model |
-| SQLite `user_model_settings` | Per-user enabled flag per model |
-| `.env` | `GROQ_API_KEY`, `JWT_SECRET`, `JWT_EXPIRE_HOURS`, optional admin seed |
+| `model_registry.py` | `GROQ_MODEL_ALLOWLIST`, metadata, scores, pricing |
+| `models.yaml` | Task profiles, auxiliary models, premium baseline |
+| SQLite settings | Admin + user model toggles |
+| SQLite `user_preferences` | `enhance_prompts` boolean |
 
-**Adding a new Groq model:** add entry to `model_registry.py` — router code unchanged.
+**Changing models:** edit `GROQ_MODEL_ALLOWLIST` in `model_registry.py`; stale SQLite rows auto-cleaned on startup.
 
 ---
 
 ## Security Notes
 
-- **JWT authentication** — bcrypt passwords; HS256 Bearer tokens on protected routes
-- **Role-based access** — `admin` role for `/admin/*`; users see only their own chats
-- **Model Controls** — admins control org-wide availability; users cannot re-enable admin-disabled models
-- `GROQ_API_KEY` and `JWT_SECRET` in `backend/.env` — never commit
-- CORS limited to local dev ports (5173, 5174)
-- Stateless JWT — no server-side session store or token revocation list (MVP)
+- JWT auth on all protected routes; admin role for `/admin/*`
+- Model Controls gate regenerate and routing (`admin_enabled AND user_enabled`)
+- Secrets in `.env` only — never commit
+- CORS: localhost 5173/5174
+
+---
+
+## Analytics
+
+- **Displayed:** total chats, costs, savings %, model usage, recent history
+- **Tracked but hidden in UI:** enhancement enabled/disabled counts, enhancer cost saved, regeneration count (available via API/DB for future use)
+- **Historical runs** with deprecated model ids remain readable; costs stored at request time
 
 ---
 

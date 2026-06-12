@@ -12,11 +12,13 @@ import Login from "./components/Login.jsx";
 import ModelControls from "./components/ModelControls.jsx";
 import Signup from "./components/Signup.jsx";
 import { fetchMe, logout } from "./api/auth.js";
+import { fetchPreferences } from "./api/preferences.js";
 import { clearToken, getToken } from "./api/http.js";
 import "./App.css";
 
 function App() {
   const [user, setUser] = useState(null);
+  const [enhancePrompts, setEnhancePrompts] = useState(true);
   const [authView, setAuthView] = useState("login");
   const [authChecking, setAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState("chat");
@@ -37,6 +39,7 @@ function App() {
         const profile = await fetchMe();
         if (!cancelled && getToken() === tokenAtStart) {
           setUser(profile);
+          setEnhancePrompts(profile.enhance_prompts ?? true);
         }
       } catch {
         if (!cancelled && getToken() === tokenAtStart) {
@@ -56,8 +59,12 @@ function App() {
   /** After signup or login: land on Chat without calling /auth/me again. */
   function handleAuthSuccess(profile) {
     setUser(profile);
+    setEnhancePrompts(profile.enhance_prompts ?? true);
     setActiveTab("chat");
     setAuthView("login");
+    fetchPreferences()
+      .then((prefs) => setEnhancePrompts(prefs.enhance_prompts ?? true))
+      .catch(() => setEnhancePrompts(true));
   }
 
   function handleChatComplete() {
@@ -67,6 +74,7 @@ function App() {
   async function handleLogout() {
     await logout();
     setUser(null);
+    setEnhancePrompts(true);
     setAuthView("login");
     setActiveTab("chat");
   }
@@ -163,13 +171,20 @@ function App() {
 
       <main className="app-main main">
         {activeTab === "chat" && (
-          <ChatPage onChatComplete={handleChatComplete} />
+          <ChatPage
+            onChatComplete={handleChatComplete}
+            enhancePrompts={enhancePrompts}
+          />
         )}
         {activeTab === "analytics" && (
           <AnalyticsDashboard onRefresh={analyticsRefresh} />
         )}
         {activeTab === "settings" && (
-          <ModelControls isAdmin={isAdmin} />
+          <ModelControls
+            isAdmin={isAdmin}
+            enhancePrompts={enhancePrompts}
+            onEnhancePromptsChange={setEnhancePrompts}
+          />
         )}
         {activeTab === "admin" && isAdmin && <AdminDashboard />}
       </main>

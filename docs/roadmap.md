@@ -1,7 +1,7 @@
 # TokenMaxx — Roadmap
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.3.1 · **Last updated:** June 2026
+> **Version:** 0.3.2 · **Last updated:** June 2026
 
 ---
 
@@ -11,51 +11,47 @@
 - [x] MVP backend, frontend, Groq/LiteLLM, analytics, multi-turn memory, docs, TokenMaxx rebrand
 
 ### M12 — Dynamic Router & Model Controls (v0.3.0)
-- [x] `model_registry.py` — metadata for all Groq chat models
-- [x] `groq_models.py` — Groq API catalog sync + missing-model logging
-- [x] `model_scorer.py` — composite routing formula
-- [x] Model Controls UI + settings API
-- [x] Fallback when preferred model disabled
-- [x] `routing_score` + `candidate_models` in chat response
-- [x] Analytics layout fix (no horizontal scroll)
+- [x] Composite scoring router, Model Controls UI, fallback routing, routing_score in chat response
 
 ### M13 — Auth & Admin (v0.3.1)
-- [x] JWT signup/login/logout/me (bcrypt + PyJWT)
-- [x] Protected routes — chat, analytics, conversations, models
-- [x] Per-user conversations and `model_runs.user_id`
-- [x] Two-tier model settings (`admin_model_settings` + `user_model_settings`)
-- [x] Unified `GET/PUT /model-settings` API
-- [x] Admin dashboard — `GET /admin/employee-usage`
-- [x] Frontend Login, Signup, Admin tab, `authFetch` HTTP layer
-- [x] Optional admin seed via `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+- [x] JWT auth, per-user data, two-tier model settings, unified `/model-settings`, admin dashboard
+
+### M14 — Preferences, Regenerate & Allowlist (v0.3.2)
+- [x] User prompt enhancement toggle (`GET/PUT /user/preferences`)
+- [x] `POST /chat/regenerate` — on-demand model retry (one LLM call per click)
+- [x] Top-5 recommendations in routing panel with availability + disabled reasons
+- [x] Groq model allowlist (6 chat + whisper audio-only)
+- [x] Stale SQLite model settings cleanup on startup
+- [x] Regenerated message UI: "User switched model to …"
+- [x] Analytics UI simplified (cost/savings focus; enhancement/regen metrics hidden)
 
 ---
 
 ## Current Milestone
 
-**M14 — Quality & Polish**
+**M15 — Quality & Polish**
 
 | Task | Status |
 |------|--------|
 | Tune registry scores from real usage | ⬜ |
-| Frontend: show enhancement fields in Chat UI | ⬜ |
+| Frontend: show original vs enhanced prompt in Chat UI | ⬜ |
 | Context window truncation | ⬜ |
 | `VITE_API_BASE` env for frontend | ⬜ |
-| pytest suite (scorer, routing, settings, auth) | ⬜ |
+| pytest suite (scorer, routing, regenerate, auth) | ⬜ |
 | LLM classifier restore (optional) | ⬜ |
 
 ---
 
 ## Next Milestone
 
-**M15 — Streaming & API Polish**
+**M16 — Streaming & API Polish**
 
 | Task | Description |
 |------|-------------|
 | SSE streaming | Stream Groq tokens to frontend |
 | Rename `mock_response` → `response` | API cleanup |
 | Mobile layout | Collapsible sidebar + analytics |
-| Token refresh / revoke | Optional server-side session management |
+| Whisper speech-to-text UI | Use allowlisted audio model |
 
 ---
 
@@ -69,13 +65,13 @@
 
 ## Production Readiness
 
-**Current score:** ~60% production ready
+**Current score:** ~65% production ready
 
 | Area | Status |
 |------|--------|
-| Core routing | ✅ Dynamic scoring |
-| Model catalog | ✅ Registry + API sync |
-| User preferences | ✅ Two-tier Model Controls |
+| Core routing | ✅ Allowlisted dynamic scoring |
+| Model regenerate | ✅ On-demand |
+| User preferences | ✅ Enhancement + model toggles |
 | Authentication | ✅ JWT + roles |
 | Admin visibility | ✅ Employee usage |
 | Tests | ❌ None |

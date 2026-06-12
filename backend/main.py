@@ -38,6 +38,7 @@ from routers import (
     model_settings_route,
     models,
     settings,
+    user_preferences,
 )
 from services.groq_models import sync_groq_catalog
 
@@ -82,6 +83,7 @@ app.add_middleware(
 
 # Mount feature routers (auth is public; chat/analytics/etc. require JWT)
 app.include_router(auth.router)
+app.include_router(user_preferences.router)
 app.include_router(admin.router)
 app.include_router(model_settings_route.router)
 app.include_router(chat.router)

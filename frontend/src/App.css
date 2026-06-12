@@ -1233,6 +1233,140 @@
   color: #fbbf24;
 }
 
+.preference-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.preference-card__title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.preference-card__desc {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.enhancement-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.enhancement-badge--on {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.enhancement-badge--off {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+}
+
+.thread-msg__model-switch {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.model-recommendations {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.model-recommendations__label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+
+.model-recommendations__hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.model-recommendations__chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.model-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.model-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.model-chip--selected {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.model-chip--disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.model-chip__id {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.model-chip__badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.model-chip__lock {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.model-chip__loading {
+  margin-left: auto;
+  color: var(--accent);
+}
+
 .model-controls-list {
   display: flex;
   flex-direction: column;

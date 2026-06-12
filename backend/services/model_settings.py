@@ -8,9 +8,17 @@ Missing DB rows default to enabled=True. Existing rows with enabled=False
 are never overridden on load.
 """
 
+import logging
+
 from sqlalchemy.orm import Session
 
-from config.model_registry import cost_per_1k_tokens, tier_for_model
+logger = logging.getLogger(__name__)
+
+from config.model_registry import (
+    GROQ_CHAT_MODEL_IDS,
+    cost_per_1k_tokens,
+    tier_for_model,
+)
 from database import AdminModelSetting, UserModelSetting
 from services.config_loader import get_allowed_task_types, resolve_task_key
 from services.groq_models import get_routable_model_ids, get_routable_models
@@ -27,8 +35,31 @@ def get_unique_routable_model_ids() -> list[str]:
     return get_routable_model_ids()
 
 
+def cleanup_stale_model_settings(db: Session) -> int:
+    """
+    Remove admin/user settings rows for models no longer in the chat allowlist.
+
+    Historical model_runs with old model ids are untouched for analytics.
+    """
+    allowed = set(GROQ_CHAT_MODEL_IDS)
+    removed = 0
+    for row in db.query(AdminModelSetting).all():
+        if row.model_id not in allowed:
+            db.delete(row)
+            removed += 1
+    for row in db.query(UserModelSetting).all():
+        if row.model_id not in allowed:
+            db.delete(row)
+            removed += 1
+    if removed:
+        db.commit()
+        logger.info("Removed %d stale model_settings rows (outside allowlist).", removed)
+    return removed
+
+
 def seed_admin_model_settings(db: Session) -> None:
     """Insert admin rows only for models that have no row yet (default enabled)."""
+    cleanup_stale_model_settings(db)
     for model_id in get_unique_routable_model_ids():
         existing = (
             db.query(AdminModelSetting)
@@ -127,6 +158,23 @@ def get_enabled_model_ids(db: Session, user_id: int) -> set[str]:
 
 def is_model_enabled(db: Session, model_id: str, user_id: int) -> bool:
     return model_id in get_enabled_model_ids(db, user_id)
+
+
+def get_model_disabled_reason(
+    db: Session, user_id: int, model_id: str
+) -> str | None:
+    """
+    Return a user-facing reason when a model cannot be selected, else None.
+
+    Messages match the regenerate UI spec.
+    """
+    admin_ok = is_admin_model_enabled(db, model_id)
+    user_ok = model_id in get_user_enabled_model_ids(db, user_id)
+    if admin_ok and user_ok:
+        return None
+    if not admin_ok:
+        return "Disabled by administrator"
+    return "Disabled in your preferences"
 
 
 def is_admin_model_enabled(db: Session, model_id: str) -> bool:
