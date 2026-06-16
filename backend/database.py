@@ -177,6 +177,7 @@ class UserModelSetting(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     model_id = Column(String(100), primary_key=True)
     enabled = Column(Boolean, nullable=False, default=True)
+    explicitly_set = Column(Boolean, nullable=False, default=False)
     updated_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -241,6 +242,11 @@ class ModelRun(Base):
     regenerated_model = Column(String(100), nullable=True)
     turn_user_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
 
+    # LLM / rule-based prompt classification metadata
+    classification_method = Column(String(30), nullable=True)
+    classification_reason = Column(Text, nullable=True)
+    classification_confidence = Column(Float, nullable=True)
+
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -277,9 +283,11 @@ def init_db() -> None:
     _migrate_conversations_columns()
     _migrate_auth_columns()
     _migrate_model_settings_tables()
+    _migrate_user_model_settings_explicit_column()
     _migrate_user_preferences_table()
     _migrate_model_runs_enhancement_columns()
     _migrate_regeneration_columns()
+    _migrate_classification_columns()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -306,6 +314,35 @@ def _migrate_model_settings_tables() -> None:
         if "user_model_settings" not in tables:
             Base.metadata.tables["user_model_settings"].create(bind=conn, checkfirst=True)
             conn.commit()
+
+
+def _migrate_user_model_settings_explicit_column() -> None:
+    """Track whether the user explicitly saved a model toggle."""
+    with engine.connect() as conn:
+        if not _table_exists(conn, "user_model_settings"):
+            return
+        if _table_has_column(conn, "user_model_settings", "explicitly_set"):
+            return
+        try:
+            conn.execute(
+                text(
+                    "ALTER TABLE user_model_settings "
+                    "ADD COLUMN explicitly_set BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+            conn.commit()
+        except OperationalError:
+            conn.rollback()
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    tables = {
+        row[0]
+        for row in conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()
+    }
+    return table_name in tables
 
 
 def _seed_model_settings() -> None:
@@ -381,6 +418,28 @@ def _migrate_regeneration_columns() -> None:
             try:
                 conn.execute(
                     text(f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_classification_columns() -> None:
+    """Add prompt classifier metadata columns to model_runs."""
+    new_columns = (
+        ("classification_method", "VARCHAR(30)"),
+        ("classification_reason", "TEXT"),
+        ("classification_confidence", "FLOAT"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
                 )
                 conn.commit()
             except OperationalError:

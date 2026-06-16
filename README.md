@@ -6,14 +6,18 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 
 ## Features
 
-- **Dynamic routing** — scores 6 allowlisted Groq chat models via composite formula
+- **LLM task classification** — Groq-powered classifier with keyword fallback; confidence + reason in routing UI
+- **Task-aware routing** — complexity-aware scoring with task-specific model bonuses (not just cheapest/fastest)
+- **Routing debug panel** — top 3 candidate scores, task type, classification confidence
 - **Model regenerate** — click any top-5 recommendation to retry with a different model (one API call per click)
 - **Model Controls** — admin org-wide toggles + user personal preferences; intelligent fallback
 - **Prompt Enhancement toggle** — user-controlled; skip enhancer to save cost/latency
+- **Prompt enhancement viewer** — see original vs enhanced prompt below replies
 - **Authentication** — JWT signup/login; per-user conversations and analytics
 - **Admin dashboard** — employee usage metrics and cost breakdown
+- **Analytics export** — download `tokenmaxx-analytics-report.csv` for demos
 - Multi-turn conversations with auto-generated titles
-- Analytics: cost, savings, model usage, and routing scores
+- **pytest suite** — 30 tests covering auth, chat, routing, classifier, model settings
 
 ## Quick Start
 
@@ -28,9 +32,9 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate          # Windows
+source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env         # add GROQ_API_KEY, JWT_SECRET
+cp .env.example .env             # add GROQ_API_KEY, JWT_SECRET
 uvicorn main:app --reload --port 8001
 ```
 
@@ -40,6 +44,12 @@ uvicorn main:app --reload --port 8001
 cd frontend
 npm install
 npm run dev
+```
+
+### Tests
+
+```bash
+cd backend && source venv/bin/activate && pytest -v
 ```
 
 ### URLs

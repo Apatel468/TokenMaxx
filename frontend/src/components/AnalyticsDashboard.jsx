@@ -12,6 +12,7 @@ import {
   fetchModelUsage,
   fetchSummary,
 } from "../api/analytics.js";
+import { downloadAnalyticsReport } from "../utils/exportAnalyticsReport.js";
 
 function formatCost(value) {
   return `$${Number(value).toFixed(6)}`;
@@ -57,6 +58,11 @@ function AnalyticsDashboard({ onRefresh }) {
 
   const totalRuns = modelUsage.reduce((sum, row) => sum + row.run_count, 0);
 
+  const handleExportReport = () => {
+    if (!summary) return;
+    downloadAnalyticsReport(summary, modelUsage, history);
+  };
+
   return (
     <div className="analytics-page">
       <header className="analytics-header">
@@ -66,14 +72,24 @@ function AnalyticsDashboard({ onRefresh }) {
             Maximum Intelligence, Minimum Cost — live usage and savings
           </p>
         </div>
-        <button
-          type="button"
-          className="analytics-refresh"
-          onClick={loadAnalytics}
-          disabled={loading}
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="analytics-header__actions">
+          <button
+            type="button"
+            className="analytics-export"
+            onClick={handleExportReport}
+            disabled={loading || !summary}
+          >
+            Export Report
+          </button>
+          <button
+            type="button"
+            className="analytics-refresh"
+            onClick={loadAnalytics}
+            disabled={loading}
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </header>
 
       {error && (

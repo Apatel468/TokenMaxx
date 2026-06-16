@@ -71,6 +71,67 @@ def seed_admin_model_settings(db: Session) -> None:
     db.commit()
 
 
+def seed_user_model_settings(db: Session, user_id: int) -> None:
+    """
+    Insert user rows for routable catalog models that have no preference yet.
+
+    Defaults to enabled=True. Does not change existing rows.
+    """
+    routable_ids = set(get_unique_routable_model_ids())
+    existing_ids = {
+        row.model_id
+        for row in db.query(UserModelSetting)
+        .filter(UserModelSetting.user_id == user_id)
+        .all()
+    }
+    added = False
+    for model_id in routable_ids:
+        if model_id not in existing_ids:
+            db.add(
+                UserModelSetting(
+                    user_id=user_id,
+                    model_id=model_id,
+                    enabled=True,
+                    explicitly_set=False,
+                )
+            )
+            added = True
+    if added:
+        db.commit()
+
+
+def sync_user_model_settings(db: Session, user_id: int) -> None:
+    """
+    Align user model preferences with the routable catalog.
+
+    - Drop stale rows outside the chat allowlist (e.g. whisper-large-v3)
+    - Remove implicit disabled rows (enabled=False, never saved by the user)
+    - Backfill missing routable models as enabled=True
+    - Preserve rows the user explicitly saved via Model Controls
+    """
+    cleanup_stale_model_settings(db)
+    routable_ids = set(get_unique_routable_model_ids())
+
+    implicit_disabled = (
+        db.query(UserModelSetting)
+        .filter(
+            UserModelSetting.user_id == user_id,
+            UserModelSetting.enabled.is_(False),
+            UserModelSetting.explicitly_set.is_(False),
+        )
+        .all()
+    )
+    removed = False
+    for row in implicit_disabled:
+        if row.model_id in routable_ids:
+            db.delete(row)
+            removed = True
+    if removed:
+        db.commit()
+
+    seed_user_model_settings(db, user_id)
+
+
 seed_model_settings = seed_admin_model_settings
 
 
@@ -89,6 +150,7 @@ def _admin_enabled_map(db: Session) -> dict[str, bool]:
 
 def _user_enabled_map(db: Session, user_id: int) -> dict[str, bool]:
     """Read user flags from DB; default True only when row is missing."""
+    sync_user_model_settings(db, user_id)
     rows = {
         row.model_id: row.enabled
         for row in db.query(UserModelSetting)
@@ -114,7 +176,12 @@ def _upsert_admin_setting(db: Session, model_id: str, enabled: bool) -> None:
 
 
 def _upsert_user_setting(
-    db: Session, user_id: int, model_id: str, enabled: bool
+    db: Session,
+    user_id: int,
+    model_id: str,
+    enabled: bool,
+    *,
+    explicitly_set: bool = True,
 ) -> None:
     row = (
         db.query(UserModelSetting)
@@ -126,12 +193,14 @@ def _upsert_user_setting(
     )
     if row:
         row.enabled = enabled
+        row.explicitly_set = explicitly_set
     else:
         db.add(
             UserModelSetting(
                 user_id=user_id,
                 model_id=model_id,
                 enabled=enabled,
+                explicitly_set=explicitly_set,
             )
         )
 
@@ -333,7 +402,9 @@ def save_user_model_settings(
             continue
         if not admin_map.get(model_id, True):
             continue
-        _upsert_user_setting(db, user_id, model_id, bool(item["enabled"]))
+        _upsert_user_setting(
+            db, user_id, model_id, bool(item["enabled"]), explicitly_set=True
+        )
 
     db.commit()
     return list_user_model_settings(db, user_id)

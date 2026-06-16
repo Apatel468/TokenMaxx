@@ -88,9 +88,17 @@ _TASK_RULES: dict[str, dict[str, str]] = {
 }
 
 _TASK_ALIASES: dict[str, str] = {
-    "creative_writing": "report",
-    "data_analysis": "report",
+    "creative_writing": "creative",
+    "data_analysis": "research",
     "translation": "general_qa",
+    "writing": "writing",
+    "summarization": "summarization",
+    "math": "math",
+    "research": "research",
+    "reasoning": "reasoning",
+    "creative": "creative",
+    "classification": "classification",
+    "report": "report",
 }
 
 # Task hints sent to the AI prompt engineer
@@ -154,6 +162,25 @@ def _extract_json_object(text: str) -> dict:
     if fence_match:
         cleaned = fence_match.group(1).strip()
     return json.loads(cleaned)
+
+
+_PRESERVE_INTENT_SUFFIX_RE = re.compile(
+    r"\n\n\[Original user request — preserve this intent: [\s\S]*?\]\s*$",
+    re.IGNORECASE,
+)
+
+
+def format_enhanced_prompt_for_display(enhanced_prompt: str) -> str:
+    """
+    Return enhanced prompt text suitable for the UI viewer.
+
+    Strips internal safety suffixes appended for the downstream model — the
+    original prompt is shown separately in the viewer.
+    """
+    text = (enhanced_prompt or "").strip()
+    if not text:
+        return ""
+    return _PRESERVE_INTENT_SUFFIX_RE.sub("", text).strip()
 
 
 def _build_ai_agent_messages(
@@ -222,13 +249,6 @@ def _validate_ai_output(parsed: dict, original_prompt: str) -> EnhancementResult
 
     if not enhanced:
         raise ValueError("AI enhancer returned empty enhanced_prompt")
-
-    # Safety net: always include the original text so meaning is traceable
-    if original_prompt.strip() not in enhanced:
-        enhanced = (
-            f"{enhanced}\n\n"
-            f"[Original user request — preserve this intent: {original_prompt.strip()}]"
-        )
 
     if not system:
         system = (

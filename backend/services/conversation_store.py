@@ -17,6 +17,7 @@ from services.model_clients import ModelResponse
 from services.conversation_title import generate_conversation_title
 from services.timezone_utils import format_timestamp_eastern
 from services.router_engine import RoutingDecision
+from services.prompt_enhancer import format_enhanced_prompt_for_display
 
 ROUTER_LABEL = "Router Selected"
 REGENERATE_LABEL = "User Selected Model"
@@ -34,6 +35,54 @@ def _selected_model_for_message(db: Session, message: Message) -> str:
     if not run:
         return ""
     return run.regenerated_model or run.selected_model or ""
+
+
+def _prompt_enhancement_for_assistant(
+    db: Session, message: Message
+) -> tuple[str, str, str]:
+    """
+    Return (original_prompt, enhanced_prompt, enhancement_method) for an assistant turn.
+
+    Original text lives on the paired user message; enhanced text on model_runs.
+    """
+    if message.role != "assistant":
+        return "", "", ""
+
+    run = (
+        db.query(ModelRun)
+        .filter(ModelRun.assistant_message_id == message.id)
+        .first()
+    )
+    if not run:
+        return "", "", ""
+
+    original = ""
+    if run.turn_user_message_id:
+        user_msg = (
+            db.query(Message)
+            .filter(Message.id == run.turn_user_message_id)
+            .first()
+        )
+        if user_msg:
+            original = user_msg.content
+
+    if not original:
+        prior_user = (
+            db.query(Message)
+            .filter(
+                Message.conversation_id == message.conversation_id,
+                Message.role == "user",
+                Message.created_at < message.created_at,
+            )
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        if prior_user:
+            original = prior_user.content
+
+    enhanced = format_enhanced_prompt_for_display(run.enhanced_prompt or "") or original
+    method = run.enhancement_method or ""
+    return original, enhanced, method
 
 
 def _user_owns_conversation(conversation: Conversation, user: User) -> bool:
@@ -159,6 +208,9 @@ def save_chat_turn(
     enhancement_method: str = "",
     enhancement_enabled: bool = True,
     enhancement_cost_saved: float = 0.0,
+    classification_method: str = "",
+    classification_reason: str = "",
+    classification_confidence: float = 0.0,
 ) -> tuple[int, str | None, int, int]:
     """Save one user message + assistant reply (+ model_run). Returns ids."""
     if conversation_id:
@@ -212,6 +264,9 @@ def save_chat_turn(
         enhancement_enabled=enhancement_enabled,
         enhancement_cost_saved=round(enhancement_cost_saved, 6),
         turn_user_message_id=user_message.id,
+        classification_method=classification_method or None,
+        classification_reason=classification_reason or None,
+        classification_confidence=classification_confidence or None,
     )
     db.add(model_run)
 
@@ -277,20 +332,29 @@ def get_conversation_detail(
 
     title = _resolve_title(db, conversation, persist_if_missing=True)
 
-    return ConversationDetail(
-        id=conversation.id,
-        title=title,
-        messages=[
+    message_rows: list[MessageOut] = []
+    for m in messages:
+        original_prompt, enhanced_prompt, enhancement_method = (
+            _prompt_enhancement_for_assistant(db, m)
+        )
+        message_rows.append(
             MessageOut(
                 id=m.id,
                 role=m.role,
                 content=m.content,
                 response_label=m.response_label or "",
                 selected_model=_selected_model_for_message(db, m),
+                original_prompt=original_prompt,
+                enhanced_prompt=enhanced_prompt,
+                enhancement_method=enhancement_method,
                 created_at=format_timestamp_eastern(m.created_at),
             )
-            for m in messages
-        ],
+        )
+
+    return ConversationDetail(
+        id=conversation.id,
+        title=title,
+        messages=message_rows,
         created_at=format_timestamp_eastern(conversation.created_at),
         updated_at=format_timestamp_eastern(conversation.updated_at),
     )

@@ -13,7 +13,7 @@ from database import Message, ModelRun, User
 from services.context_builder import PromptContext
 from services.conversation_store import get_conversation_or_404
 from services.cost_tracker import estimate_costs, log_request_metrics
-from services.groq_models import get_routable_models
+from services.groq_models import get_model_record, get_routable_models
 from services.model_clients import generate_response
 from services.model_settings import get_model_disabled_reason
 
@@ -168,11 +168,27 @@ def regenerate_with_model(
     db.commit()
     db.refresh(assistant_message)
 
+    record = get_model_record(model_id)
+    model_label = record.model_name if record else model_id
+    provider = record.provider if record else "groq"
+    regeneration_reason = (
+        f"User manually regenerated this response with {model_label}."
+    )
+
     return {
         "response": model_response.text,
         "model_used": model_id,
+        "model_label": model_label,
+        "provider": provider,
+        "task_type": context.task_type,
+        "regeneration_reason": regeneration_reason,
         "actual_cost": costs.actual_cost,
+        "premium_cost": costs.premium_cost,
+        "savings_percentage": costs.savings_percentage,
+        "input_tokens": costs.input_tokens,
+        "output_tokens": costs.output_tokens,
         "latency_ms": model_response.latency_ms,
         "assistant_message_id": assistant_message.id,
         "response_label": REGENERATE_LABEL,
+        "was_user_selected": True,
     }

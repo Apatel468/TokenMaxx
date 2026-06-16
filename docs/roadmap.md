@@ -1,7 +1,7 @@
 # TokenMaxx — Roadmap
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.3.2 · **Last updated:** June 2026
+> **Version:** 0.3.3 · **Last updated:** June 2026
 
 ---
 
@@ -25,33 +25,32 @@
 - [x] Regenerated message UI: "User switched model to …"
 - [x] Analytics UI simplified (cost/savings focus; enhancement/regen metrics hidden)
 
+### M15 — Quality & Polish (v0.3.3)
+- [x] LLM task classifier (`llm_classifier.py`) with keyword fallback
+- [x] Task-aware routing — complexity score, dynamic weights, task-specific bonuses
+- [x] Top-3 candidate scores in Latest Routing panel for debugging
+- [x] Classification confidence + reason in routing UI
+- [x] Prompt enhancement viewer (original vs enhanced prompt)
+- [x] Model settings sync fix (`explicitly_set`, `sync_user_model_settings`)
+- [x] pytest suite — auth, chat, classifier, routing, model settings (30 tests)
+- [x] Analytics CSV export (`tokenmaxx-analytics-report.csv`)
+
 ---
 
 ## Current Milestone
 
-**M15 — Quality & Polish**
+**M16 — Streaming & API Polish**
 
 | Task | Status |
 |------|--------|
-| Tune registry scores from real usage | ⬜ |
-| Frontend: show original vs enhanced prompt in Chat UI | ⬜ |
+| SSE streaming | ⬜ |
+| Rename `mock_response` → `response` | ⬜ |
 | Context window truncation | ⬜ |
 | `VITE_API_BASE` env for frontend | ⬜ |
-| pytest suite (scorer, routing, regenerate, auth) | ⬜ |
-| LLM classifier restore (optional) | ⬜ |
-
----
-
-## Next Milestone
-
-**M16 — Streaming & API Polish**
-
-| Task | Description |
-|------|-------------|
-| SSE streaming | Stream Groq tokens to frontend |
-| Rename `mock_response` → `response` | API cleanup |
-| Mobile layout | Collapsible sidebar + analytics |
-| Whisper speech-to-text UI | Use allowlisted audio model |
+| Mobile layout | ⬜ |
+| Analytics PDF export | ⬜ |
+| Tune registry scores from real usage | ⬜ |
+| Whisper speech-to-text UI | ⬜ |
 
 ---
 
@@ -65,14 +64,16 @@
 
 ## Production Readiness
 
-**Current score:** ~65% production ready
+**Current score:** ~75% production ready
 
 | Area | Status |
 |------|--------|
-| Core routing | ✅ Allowlisted dynamic scoring |
+| Core routing | ✅ Task-aware complexity scoring |
+| Task classification | ✅ LLM + keyword fallback |
 | Model regenerate | ✅ On-demand |
 | User preferences | ✅ Enhancement + model toggles |
 | Authentication | ✅ JWT + roles |
 | Admin visibility | ✅ Employee usage |
-| Tests | ❌ None |
+| Analytics export | ✅ CSV (client-side) |
+| Tests | ✅ 30 pytest tests |
 | Deploy | ❌ Local only |

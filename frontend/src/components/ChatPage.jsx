@@ -18,7 +18,30 @@ import { regenerateChat, sendChat } from "../api/chat.js";
 
 import { fetchConversation, fetchConversations } from "../api/conversations.js";
 
+import PromptEnhancementViewer from "./PromptEnhancementViewer.jsx";
+
 import { resolveChatTitle, resolveSidebarTitle } from "../utils/conversationTitle.js";
+
+/** Merge regenerate API metadata into the Latest Routing panel state. */
+function applyRegenerateToRoutingResult(previousResult, regenData) {
+  if (!previousResult) return previousResult;
+
+  return {
+    ...previousResult,
+    selected_model: regenData.model_label || regenData.model_used,
+    selected_model_id: regenData.model_used,
+    reason_selected: regenData.regeneration_reason,
+    task_type: regenData.task_type || previousResult.task_type,
+    estimated_actual_cost: regenData.actual_cost,
+    estimated_premium_cost: regenData.premium_cost,
+    estimated_savings_percentage: regenData.savings_percentage,
+    was_user_selected: regenData.was_user_selected !== false,
+    used_fallback: false,
+    fallback_message: "",
+    routing_score: 0,
+    assistant_message_id: regenData.assistant_message_id,
+  };
+}
 
 
 
@@ -214,9 +237,14 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
     setError(null);
 
     try {
-      await regenerateChat(result.conversation_id, result.user_message_id, modelId);
+      const regenData = await regenerateChat(
+        result.conversation_id,
+        result.user_message_id,
+        modelId,
+      );
       const detail = await fetchConversation(result.conversation_id);
       setMessages(detail.messages);
+      setResult((prev) => applyRegenerateToRoutingResult(prev, regenData));
       if (onChatComplete) onChatComplete();
     } catch (err) {
       setError(err.message || "Could not regenerate with that model.");
@@ -357,6 +385,11 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                       User switched model to &ldquo;{msg.selected_model}&rdquo;
                     </p>
                     <p className="thread-msg__text">{msg.content}</p>
+                    <PromptEnhancementViewer
+                      originalPrompt={msg.original_prompt}
+                      enhancedPrompt={msg.enhanced_prompt}
+                      enhancementMethod={msg.enhancement_method}
+                    />
                   </>
                 ) : (
                   <>
@@ -364,6 +397,11 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                       {msg.response_label || "Assistant"}
                     </span>
                     <p className="thread-msg__text">{msg.content}</p>
+                    <PromptEnhancementViewer
+                      originalPrompt={msg.original_prompt}
+                      enhancedPrompt={msg.enhanced_prompt}
+                      enhancementMethod={msg.enhancement_method}
+                    />
                   </>
                 )}
 
@@ -459,9 +497,15 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
                 <div className="routing-panel__info">
 
-                  {result.used_fallback && result.fallback_message && (
+                  {result.used_fallback && result.fallback_message && !result.was_user_selected && (
                     <div className="routing-fallback-badge" role="status">
                       {result.fallback_message}
+                    </div>
+                  )}
+
+                  {result.was_user_selected && (
+                    <div className="routing-user-selected-badge" role="status">
+                      User Selected
                     </div>
                   )}
 
@@ -491,6 +535,15 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
                     </div>
 
+                    {result.classification_confidence > 0 && (
+                      <div className="stat-card">
+                        <span className="stat-card__label">Confidence</span>
+                        <span className="stat-card__value">
+                          {(result.classification_confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    )}
+
                     <div className="stat-card">
 
                       <span className="stat-card__label">Enhancement</span>
@@ -503,7 +556,7 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
                     </div>
 
-                    {result.routing_score > 0 && (
+                    {result.routing_score > 0 && !result.was_user_selected && (
 
                       <div className="stat-card">
 
@@ -520,6 +573,36 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     )}
 
                   </div>
+
+                  {result.top_candidate_scores?.length > 0 && (
+                    <div className="routing-candidates">
+                      <span className="routing-candidates__label">
+                        Top candidate scores
+                      </span>
+                      <ul className="routing-candidates__list">
+                        {result.top_candidate_scores.map((candidate, index) => (
+                          <li
+                            key={candidate.model_id}
+                            className={`routing-candidates__item ${
+                              candidate.model_id === result.selected_model_id
+                                ? "routing-candidates__item--selected"
+                                : ""
+                            }`}
+                          >
+                            <span className="routing-candidates__rank">
+                              #{index + 1}
+                            </span>
+                            <span className="routing-candidates__id">
+                              {candidate.model_id}
+                            </span>
+                            <span className="routing-candidates__score">
+                              {Number(candidate.score).toFixed(1)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {recommendations.length > 0 && (
 
@@ -589,9 +672,9 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                               </span>
 
                               {isSelected && (
-
-                                <span className="model-chip__badge">Router</span>
-
+                                <span className="model-chip__badge">
+                                  {result.was_user_selected ? "User Selected" : "Router"}
+                                </span>
                               )}
 
                               {isLoading && (
@@ -629,6 +712,18 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     <p className="reason-box__text">{result.reason_selected}</p>
 
                   </div>
+
+                  {result.classification_reason && (
+                    <div className="reason-box reason-box--classification">
+                      <span className="reason-box__label">
+                        Classification
+                        {result.classification_method === "llm" ? " (AI)" : ""}
+                      </span>
+                      <p className="reason-box__text">
+                        {result.classification_reason}
+                      </p>
+                    </div>
+                  )}
 
                 </div>
 

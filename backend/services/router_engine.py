@@ -75,7 +75,12 @@ def route(context: PromptContext, db: Session, user_id: int) -> RoutingDecision:
         )
 
     # Score only allowlisted chat models (catalog is already allowlist-filtered)
-    all_scored = score_candidates(context.task_type, catalog)
+    all_scored = score_candidates(
+        context.task_type,
+        catalog,
+        prompt=context.prompt,
+        estimated_input_tokens=context.estimated_input_tokens,
+    )
     candidate_dicts = [c.to_dict() for c in all_scored]
 
     preferred_id = all_scored[0].model_id if all_scored else ""
@@ -102,9 +107,13 @@ def route(context: PromptContext, db: Session, user_id: int) -> RoutingDecision:
             f"{profile.get('description', '')}"
         )
     else:
+        bonus_note = ""
+        if winner.task_preference_bonus > 0:
+            bonus_note = f" (+{winner.task_preference_bonus:.0f} task bonus)"
         reason = (
-            f"Scored {winner.model_id} highest (score {winner.score}) for "
-            f"{task_key} — {profile.get('description', '')}"
+            f"Scored {winner.model_id} highest (score {winner.score}{bonus_note}) for "
+            f"{task_key} — {profile.get('description', '')} "
+            f"[complexity {winner.complexity_score:.2f}]"
         )
         fallback_message = ""
 

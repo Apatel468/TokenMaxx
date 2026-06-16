@@ -1,22 +1,32 @@
 """
-Prompt Analyzer — figures out what kind of task the user is asking for.
+Prompt Analyzer — classifies user prompts before routing.
 
-For the MVP we use simple keyword matching (no ML, no API calls).
-Later you could swap this for a small classifier model or LiteLLM call.
+Primary: LLM classifier (Groq llama-3.1-8b-instant) when GROQ_API_KEY is set.
+Fallback: keyword rules (no API call).
 """
 
+from __future__ import annotations
+
+import logging
 import re
 from dataclasses import dataclass
 
+from services.llm_classifier import classify_prompt_with_llm
 
-# Task types the router understands
+logger = logging.getLogger(__name__)
+
+# Task types returned by analyze_prompt (LLM + rule fallback).
 TASK_TYPES = [
-    "coding",
-    "summarization",
-    "creative_writing",
-    "data_analysis",
     "general_qa",
-    "translation",
+    "coding",
+    "reasoning",
+    "writing",
+    "summarization",
+    "math",
+    "research",
+    "creative",
+    "report",
+    "classification",
 ]
 
 
@@ -25,13 +35,14 @@ class AnalysisResult:
     """Output of prompt analysis."""
 
     task_type: str
-    confidence: float  # 0.0 to 1.0 — how sure we are about the classification
+    confidence: float
     keywords_matched: list[str]
-    difficulty: str = "medium"  # easy | medium | hard (used by prompt_enhancer)
-    risk_level: str = "low"  # low | medium | high (used by prompt_enhancer)
+    difficulty: str = "medium"
+    risk_level: str = "low"
+    classification_reason: str = ""
+    classification_method: str = "rule_fallback"  # "llm" | "rule_fallback"
 
 
-# Keyword rules: each task type maps to words/phrases we look for
 _KEYWORD_RULES: dict[str, list[str]] = {
     "coding": [
         "code", "function", "bug", "debug", "python", "javascript",
@@ -42,17 +53,33 @@ _KEYWORD_RULES: dict[str, list[str]] = {
         "summarize", "summary", "tl;dr", "tldr", "brief", "condense",
         "key points", "main ideas", "short version", "in short",
     ],
-    "creative_writing": [
+    "creative": [
         "write a story", "poem", "creative", "fiction", "narrative",
         "blog post", "essay", "draft", "compose", "lyrics", "script",
     ],
-    "data_analysis": [
-        "analyze", "analysis", "statistics", "chart", "graph", "trend",
-        "dataset", "csv", "excel", "metrics", "correlation", "forecast",
+    "writing": [
+        "write", "rewrite", "edit", "paragraph", "email", "letter",
+        "tone", "wording", "proofread",
     ],
-    "translation": [
-        "translate", "translation", "in spanish", "in french", "in german",
-        "in hindi", "in chinese", "convert to", "language",
+    "research": [
+        "research", "analyze", "analysis", "statistics", "chart", "graph",
+        "trend", "dataset", "csv", "metrics", "correlation", "study",
+    ],
+    "math": [
+        "calculate", "equation", "algebra", "calculus", "integral",
+        "derivative", "probability", "geometry", "math", "solve for",
+    ],
+    "reasoning": [
+        "logic", "deduce", "infer", "step by step", "prove", "why does",
+        "compare and contrast", "evaluate", "trade-off",
+    ],
+    "report": [
+        "report", "briefing", "memo", "white paper", "executive summary",
+        "findings", "recommendations",
+    ],
+    "classification": [
+        "classify", "categorize", "label", "tag", "sort into",
+        "which category", "type of",
     ],
     "general_qa": [
         "what is", "what are", "how does", "why", "explain", "define",
@@ -61,26 +88,17 @@ _KEYWORD_RULES: dict[str, list[str]] = {
 }
 
 
-def analyze_prompt(prompt: str) -> AnalysisResult:
-    """
-    Classify a user prompt into one of our task types.
-
-    Strategy:
-      1. Lowercase the prompt for case-insensitive matching.
-      2. Score each task type by counting keyword hits.
-      3. Pick the highest-scoring type; fall back to general_qa.
-    """
+def _analyze_with_rules(prompt: str) -> AnalysisResult:
+    """Keyword-based classifier used when the LLM path is unavailable."""
     normalized = prompt.lower().strip()
     scores: dict[str, list[str]] = {task: [] for task in TASK_TYPES}
 
     for task_type, keywords in _KEYWORD_RULES.items():
         for keyword in keywords:
-            # Use word boundaries so "class" doesn't match inside "classroom"
             pattern = r"\b" + re.escape(keyword) + r"\b"
             if re.search(pattern, normalized):
                 scores[task_type].append(keyword)
 
-    # Find the task type with the most keyword matches
     best_task = "general_qa"
     best_matches: list[str] = []
     best_score = 0
@@ -91,14 +109,39 @@ def analyze_prompt(prompt: str) -> AnalysisResult:
             best_task = task_type
             best_matches = matches
 
-    # Rough confidence: more keyword hits = more confident
     if best_score == 0:
-        confidence = 0.5  # no keywords matched — default guess
+        confidence = 0.5
+        reason = "No strong keyword match — defaulted to general Q&A."
     else:
         confidence = min(0.5 + best_score * 0.15, 0.95)
+        reason = f"Keyword match suggests {best_task.replace('_', ' ')}."
 
     return AnalysisResult(
         task_type=best_task,
         confidence=confidence,
         keywords_matched=best_matches,
+        classification_reason=reason,
+        classification_method="rule_fallback",
     )
+
+
+def analyze_prompt(prompt: str) -> AnalysisResult:
+    """
+    Classify a user prompt into a routing task type.
+
+    1. Try LLM classifier (Groq) when API key is available.
+    2. On any failure, use keyword rules.
+    """
+    try:
+        llm_result = classify_prompt_with_llm(prompt)
+        return AnalysisResult(
+            task_type=llm_result.task_type,
+            confidence=llm_result.confidence,
+            keywords_matched=[],
+            classification_reason=llm_result.reason,
+            classification_method="llm",
+        )
+    except Exception as exc:
+        logger.warning("LLM classifier failed (%s) — using rule fallback", exc)
+
+    return _analyze_with_rules(prompt)

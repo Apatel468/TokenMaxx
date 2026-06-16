@@ -92,10 +92,25 @@ class RegenerateResponse(BaseModel):
 
     response: str
     model_used: str
+    model_label: str = Field(
+        default="",
+        description="Human-readable model name for the UI.",
+    )
+    provider: str = "groq"
+    task_type: str = ""
+    regeneration_reason: str = Field(
+        default="",
+        description="Why this model was used (user-initiated regeneration).",
+    )
     actual_cost: float
+    premium_cost: float = 0.0
+    savings_percentage: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
     latency_ms: float
     assistant_message_id: int
     response_label: str = "User Selected Model"
+    was_user_selected: bool = True
 
 
 class ModelRecommendation(BaseModel):
@@ -153,6 +168,18 @@ class ChatResponse(BaseModel):
         description='How the prompt was enhanced: "ai" or "rule_fallback".'
     )
     task_type: str
+    classification_confidence: float = Field(
+        default=0.0,
+        description="Classifier confidence from 0.0 to 1.0.",
+    )
+    classification_reason: str = Field(
+        default="",
+        description="Short user-facing explanation of the task classification.",
+    )
+    classification_method: str = Field(
+        default="rule_fallback",
+        description='How the task was classified: "llm" or "rule_fallback".',
+    )
     selected_model: str
     reason_selected: str
     mock_response: str
@@ -183,7 +210,11 @@ class ChatResponse(BaseModel):
     )
     candidate_models: list[dict] = Field(
         default_factory=list,
-        description="Legacy full scored list (all candidates).",
+        description="Full scored candidate list for debugging.",
+    )
+    top_candidate_scores: list[dict] = Field(
+        default_factory=list,
+        description="Top 3 routing scores for the Latest Routing debug panel.",
     )
     top_recommendations: list[ModelRecommendation] = Field(
         default_factory=list,
@@ -335,6 +366,18 @@ class MessageOut(BaseModel):
     selected_model: str = Field(
         default="",
         description="Model used for regenerated assistant replies (empty otherwise).",
+    )
+    original_prompt: str = Field(
+        default="",
+        description="User text before enhancement (assistant turns only).",
+    )
+    enhanced_prompt: str = Field(
+        default="",
+        description="Prompt sent to the model after optimization (assistant turns only).",
+    )
+    enhancement_method: str = Field(
+        default="",
+        description='How the prompt was enhanced: "ai", "rule_fallback", "disabled", or "reused".',
     )
     created_at: str = Field(
         description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",

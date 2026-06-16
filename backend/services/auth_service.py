@@ -94,6 +94,11 @@ def register_user(db: Session, email: str, password: str, role: str = "user") ->
     db.flush()  # assign user.id before we build the JWT
     db.commit()
     db.refresh(user)
+
+    from services.model_settings import sync_user_model_settings
+
+    sync_user_model_settings(db, user.id)
+
     return user
 
 

@@ -14,12 +14,12 @@
 default_task: general_qa
 
 task_profiles:
-  flashcards:
-    description: Simple educational content — favor writing quality.
+  general_qa:
+    description: Everyday questions and short answers.
     task_match_weights:
-      coding: 0.10
-      reasoning: 0.25
-      writing: 0.65
+      coding: 0.15
+      reasoning: 0.40
+      writing: 0.45
 
   coding:
     description: Programming, debugging, and technical tasks.
@@ -28,25 +28,73 @@ task_profiles:
       reasoning: 0.20
       writing: 0.10
 
-  general_qa:
-    description: Everyday questions and short answers.
+  reasoning:
+    description: Logic, inference, and multi-step thinking.
     task_match_weights:
       coding: 0.15
-      reasoning: 0.40
-      writing: 0.45
+      reasoning: 0.70
+      writing: 0.15
+
+  writing:
+    description: Editing, composition, and prose.
+    task_match_weights:
+      coding: 0.05
+      reasoning: 0.25
+      writing: 0.70
+
+  summarization:
+    description: Condensing content into shorter form.
+    task_match_weights:
+      coding: 0.05
+      reasoning: 0.30
+      writing: 0.65
+
+  math:
+    description: Calculations, equations, and quantitative problems.
+    task_match_weights:
+      coding: 0.20
+      reasoning: 0.65
+      writing: 0.15
+
+  research:
+    description: Analysis, studies, and data-oriented questions.
+    task_match_weights:
+      coding: 0.15
+      reasoning: 0.45
+      writing: 0.40
+
+  creative:
+    description: Stories, poems, and imaginative content.
+    task_match_weights:
+      coding: 0.05
+      reasoning: 0.20
+      writing: 0.75
 
   report:
-    description: Reports, summaries, and long-form writing.
+    description: Reports, briefings, and long-form structured writing.
     task_match_weights:
       coding: 0.10
       reasoning: 0.30
       writing: 0.60
 
-# Map analyzer outputs not listed above to a task profile key
+  classification:
+    description: Labeling, categorization, and tagging tasks.
+    task_match_weights:
+      coding: 0.20
+      reasoning: 0.50
+      writing: 0.30
+
+  flashcards:
+    description: Simple educational content — favor writing quality.
+    task_match_weights:
+      coding: 0.10
+      reasoning: 0.25
+      writing: 0.65
+
+# Map legacy analyzer outputs to task profile keys
 task_aliases:
-  summarization: report
-  creative_writing: report
-  data_analysis: report
+  creative_writing: creative
+  data_analysis: research
   translation: general_qa
 
 # Small/fast models for non-routing Groq calls (not scored by the router)
