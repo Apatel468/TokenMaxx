@@ -31,6 +31,9 @@ def test_chat_routes_prompt_and_returns_mock_response(client, auth_token):
     assert body["assistant_message_id"] > 0
     assert body["selected_model_id"]
     assert body["task_type"]
+    if body.get("prompt_analysis"):
+        assert body["prompt_analysis"]["persona"]
+        assert body["prompt_analysis"]["enhancement_strategy"]
 
 
 def test_chat_continues_existing_conversation(client, auth_token):

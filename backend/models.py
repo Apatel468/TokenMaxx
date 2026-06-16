@@ -125,6 +125,19 @@ class ModelRecommendation(BaseModel):
     disabled_reason: str = ""
 
 
+class PromptAnalysisOut(BaseModel):
+    """Structured Prompt Intelligence Engine v2 metadata."""
+
+    original_prompt: str
+    task_type: str
+    complexity_score: int = Field(ge=0, le=100)
+    complexity_level: str
+    persona: str
+    output_format: str
+    enhancement_strategy: str
+    enhanced_prompt: str
+
+
 class ChatRequest(BaseModel):
     """What the client sends when calling POST /chat."""
 
@@ -223,6 +236,10 @@ class ChatResponse(BaseModel):
     selected_model_id: str = ""
     user_message_id: int = 0
     assistant_message_id: int = 0
+    prompt_analysis: PromptAnalysisOut | None = Field(
+        default=None,
+        description="Prompt Intelligence Engine v2 analysis and enhancement metadata.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +395,10 @@ class MessageOut(BaseModel):
     enhancement_method: str = Field(
         default="",
         description='How the prompt was enhanced: "ai", "rule_fallback", "disabled", or "reused".',
+    )
+    prompt_analysis: PromptAnalysisOut | None = Field(
+        default=None,
+        description="Prompt Intelligence Engine v2 metadata for assistant turns.",
     )
     created_at: str = Field(
         description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",

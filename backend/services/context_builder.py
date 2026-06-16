@@ -2,7 +2,7 @@
 Context Builder — prepares metadata about the prompt before routing (Phase 4).
 
 Pipeline inside build_context:
-  1. Call prompt_enhancer.enhance_prompt() — AI agent (Groq) or rule fallback
+  1. Prompt Intelligence Engine v2 — analyze then enhance (or skip if disabled)
   2. Build message_history for LiteLLM (prior turns + enhanced latest message)
   3. Estimate token usage for cost tracking
 """
@@ -10,7 +10,11 @@ Pipeline inside build_context:
 from dataclasses import dataclass, field
 
 from services.prompt_analyzer import AnalysisResult
-from services.prompt_enhancer import enhance_prompt
+from services.prompt_intelligence import (
+    PromptAnalysis,
+    analyze_and_enhance,
+    build_disabled_analysis,
+)
 
 
 @dataclass
@@ -28,6 +32,7 @@ class PromptContext:
     system_prompt: str | None = None
     enhancement_reason: str = ""
     enhancement_method: str = "rule_fallback"  # "ai", "rule_fallback", or "disabled"
+    prompt_analysis: PromptAnalysis | None = None
     # Full chat history for LiteLLM: prior messages + enhanced latest user turn
     message_history: list[dict] = field(default_factory=list)
 
@@ -55,22 +60,24 @@ def build_context(
     prior = prior_messages or []
 
     if enhance_prompt_enabled:
-        enhancement = enhance_prompt(
+        prompt_analysis = analyze_and_enhance(
             original_prompt=prompt,
             task_type=analysis.task_type,
             difficulty=analysis.difficulty,
             risk_level=analysis.risk_level,
             conversation_history=prior,
         )
-        enhanced_text = enhancement.enhanced_prompt
-        system_text = enhancement.system_prompt
-        reason = enhancement.enhancement_reason
-        method = enhancement.enhancement_method
     else:
-        enhanced_text = prompt
-        system_text = None
-        reason = "Prompt enhancement disabled by user"
-        method = "disabled"
+        prompt_analysis = build_disabled_analysis(
+            original_prompt=prompt,
+            task_type=analysis.task_type,
+            difficulty=analysis.difficulty,
+        )
+
+    enhanced_text = prompt_analysis.enhanced_prompt
+    system_text = prompt_analysis.system_prompt or None
+    reason = prompt_analysis.enhancement_reason
+    method = prompt_analysis.enhancement_method
 
     # LiteLLM history: keep prior turns original; only the new turn may be enhanced
     full_history = prior + [{"role": "user", "content": enhanced_text}]
@@ -90,5 +97,6 @@ def build_context(
         system_prompt=system_text,
         enhancement_reason=reason,
         enhancement_method=method,
+        prompt_analysis=prompt_analysis,
         message_history=full_history,
     )

@@ -14,6 +14,7 @@ and we only check whether GROQ_API_KEY is present (not its value).
 import logging
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -213,6 +214,96 @@ def _generate_mock_response(groq_model: str, context: PromptContext) -> ModelRes
             is_mock=True,
             latency_ms=round(latency_ms, 1),
             litellm_model="mock",
+        )
+    )
+
+
+def _fake_stream_chunks(text: str) -> Iterator[str]:
+    """Yield text word-by-word when real streaming is unavailable."""
+    words = text.split()
+    if not words:
+        return
+    for index, word in enumerate(words):
+        yield word if index == 0 else f" {word}"
+
+
+def _call_groq_stream(
+    groq_model: str,
+    context: PromptContext,
+    messages: list[dict] | None = None,
+) -> Iterator[str]:
+    """Stream Groq completion chunks via LiteLLM."""
+    import litellm
+
+    litellm_model = _to_litellm_model(groq_model)
+    litellm_messages = _build_litellm_messages(
+        context, groq_model, messages=messages
+    )
+
+    response = litellm.completion(
+        model=litellm_model,
+        messages=litellm_messages,
+        stream=True,
+    )
+    for chunk in response:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+def stream_response(
+    groq_model: str,
+    context: PromptContext,
+    messages: list[dict] | None = None,
+) -> Iterator[str]:
+    """
+    Yield response text chunks for SSE streaming.
+
+    Uses real Groq streaming when available; otherwise fakes word-by-word
+    delivery from the mock/fallback full response.
+    """
+    if not _has_groq_key():
+        logger.info(
+            "Mock stream fallback | groq_model=%s | reason=%s not set",
+            groq_model,
+            GROQ_ENV_KEY,
+        )
+        mock = _generate_mock_response(groq_model, context)
+        yield from _fake_stream_chunks(mock.text)
+        return
+
+    try:
+        yield from _call_groq_stream(groq_model, context, messages=messages)
+    except Exception as exc:
+        logger.warning(
+            "Groq stream failed | model=%s | error=%s — fake streaming mock",
+            groq_model,
+            exc,
+        )
+        mock = _generate_mock_response(groq_model, context)
+        yield from _fake_stream_chunks(mock.text)
+
+
+def build_response_from_stream(
+    groq_model: str,
+    context: PromptContext,
+    accumulated_text: str,
+    *,
+    latency_ms: float,
+    litellm_model: str = "",
+    input_tokens: int | None = None,
+    is_mock: bool = False,
+) -> ModelResponse:
+    """Build a ModelResponse after all stream chunks have been collected."""
+    output_tokens = max(len(accumulated_text) // 4, 1)
+    return _finalize_response(
+        ModelResponse(
+            text=accumulated_text,
+            estimated_output_tokens=output_tokens,
+            input_tokens=input_tokens,
+            is_mock=is_mock,
+            latency_ms=round(latency_ms, 1),
+            litellm_model=litellm_model or _to_litellm_model(groq_model),
         )
     )
 

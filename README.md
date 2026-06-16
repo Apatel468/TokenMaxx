@@ -2,30 +2,24 @@
 
 **Maximum Intelligence, Minimum Cost**
 
-TokenMaxx routes user prompts to the most cost-effective Groq model for each task, optionally engineers prompts for better results, and tracks savings versus a premium baseline (GPT-4o).
+TokenMaxx routes user prompts to the most cost-effective Groq model for each task, enhances prompts with Prompt Intelligence v2, streams responses live, and tracks savings versus a premium baseline (GPT-4o).
 
 ## Features
 
-- **LLM task classification** — Groq-powered classifier with keyword fallback; confidence + reason in routing UI
-- **Task-aware routing** — complexity-aware scoring with task-specific model bonuses (not just cheapest/fastest)
-- **Routing debug panel** — top 3 candidate scores, task type, classification confidence
-- **Model regenerate** — click any top-5 recommendation to retry with a different model (one API call per click)
-- **Model Controls** — admin org-wide toggles + user personal preferences; intelligent fallback
-- **Prompt Enhancement toggle** — user-controlled; skip enhancer to save cost/latency
-- **Prompt enhancement viewer** — see original vs enhanced prompt below replies
-- **Authentication** — JWT signup/login; per-user conversations and analytics
-- **Admin dashboard** — employee usage metrics and cost breakdown
-- **Analytics export** — download `tokenmaxx-analytics-report.csv` for demos
-- Multi-turn conversations with auto-generated titles
-- **pytest suite** — 30 tests covering auth, chat, routing, classifier, model settings
+- **LLM task classification** — Groq-powered classifier with keyword fallback
+- **Prompt Intelligence Engine v2** — analyze then enhance by task type, complexity (0–100), and persona
+- **SSE streaming chat** — token-by-token responses via `POST /chat/stream`
+- **Task-aware routing** — complexity-aware scoring with task-specific model bonuses
+- **Routing debug panel** — top 3 candidate scores, classification confidence, reason
+- **Model regenerate** — retry with any top-5 model (one API call per click)
+- **Model Controls** — admin org-wide + user personal toggles
+- **Prompt optimization viewer** — task, complexity, persona, strategy, enhanced prompt
+- **Analytics export** — `tokenmaxx-analytics-report.csv` for demos
+- **Authentication** — JWT; per-user conversations and analytics
+- **Admin dashboard** — employee usage metrics
+- **pytest suite** — 39 tests
 
 ## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- Groq API key (optional — mock mode works without it)
 
 ### Backend
 

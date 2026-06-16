@@ -247,6 +247,14 @@ class ModelRun(Base):
     classification_reason = Column(Text, nullable=True)
     classification_confidence = Column(Float, nullable=True)
 
+    # Prompt Intelligence Engine v2 metadata
+    prompt_complexity_score = Column(Integer, nullable=True)
+    prompt_complexity_level = Column(String(20), nullable=True)
+    prompt_persona = Column(String(100), nullable=True)
+    prompt_output_format = Column(String(200), nullable=True)
+    prompt_enhancement_task_type = Column(String(40), nullable=True)
+    enhancement_strategy = Column(String(60), nullable=True)
+
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -288,6 +296,7 @@ def init_db() -> None:
     _migrate_model_runs_enhancement_columns()
     _migrate_regeneration_columns()
     _migrate_classification_columns()
+    _migrate_prompt_intelligence_columns()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -430,6 +439,31 @@ def _migrate_classification_columns() -> None:
         ("classification_method", "VARCHAR(30)"),
         ("classification_reason", "TEXT"),
         ("classification_confidence", "FLOAT"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_prompt_intelligence_columns() -> None:
+    """Add Prompt Intelligence Engine v2 columns to model_runs."""
+    new_columns = (
+        ("prompt_complexity_score", "INTEGER"),
+        ("prompt_complexity_level", "VARCHAR(20)"),
+        ("prompt_persona", "VARCHAR(100)"),
+        ("prompt_output_format", "VARCHAR(200)"),
+        ("prompt_enhancement_task_type", "VARCHAR(40)"),
+        ("enhancement_strategy", "VARCHAR(60)"),
     )
     with engine.connect() as conn:
         for column_name, column_type in new_columns:

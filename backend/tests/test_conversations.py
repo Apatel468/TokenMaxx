@@ -29,3 +29,11 @@ def test_conversation_detail_includes_prompt_enhancement(client, auth_token):
     assert assistant["original_prompt"] == "Summarize quantum computing."
     assert assistant["enhanced_prompt"]
     assert assistant["enhancement_method"] in ("ai", "rule_fallback", "disabled", "reused", "")
+    if assistant.get("prompt_analysis"):
+        assert assistant["prompt_analysis"]["persona"]
+        assert assistant["prompt_analysis"]["complexity_level"] in (
+            "simple",
+            "medium",
+            "complex",
+        )
+        assert "[Original user request" not in assistant["prompt_analysis"]["enhanced_prompt"]

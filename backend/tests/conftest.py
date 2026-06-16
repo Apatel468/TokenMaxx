@@ -35,6 +35,14 @@ def _mock_generate_response(groq_model: str, context, messages=None) -> ModelRes
     )
 
 
+def _mock_stream_response(groq_model: str, context, messages=None):
+    """Yield the same mocked text in word-sized chunks."""
+    text = "Mocked LLM response for testing."
+    words = text.split()
+    for index, word in enumerate(words):
+        yield word if index == 0 else f" {word}"
+
+
 @pytest.fixture
 def test_db(tmp_path, monkeypatch):
     """
@@ -75,14 +83,16 @@ def client(test_db, monkeypatch):
     import services.regenerate_service as regenerate_service
 
     monkeypatch.setattr(model_clients, "generate_response", _mock_generate_response)
+    monkeypatch.setattr(model_clients, "stream_response", _mock_stream_response)
     monkeypatch.setattr(
         regenerate_service, "generate_response", _mock_generate_response
     )
 
-    # Import main after patches; chat router holds a direct import of generate_response.
+    # Import main after patches; chat router holds direct imports.
     import routers.chat as chat_router
 
     monkeypatch.setattr(chat_router, "generate_response", _mock_generate_response)
+    monkeypatch.setattr(chat_router, "stream_response", _mock_stream_response)
 
     import main
 

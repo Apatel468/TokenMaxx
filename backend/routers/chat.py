@@ -9,41 +9,51 @@ POST /chat pipeline:
   5. Generate response (model_clients + LiteLLM)
   6. Track costs and persist to SQLite
 
+POST /chat/stream — same pipeline with SSE token streaming.
 POST /chat/regenerate — user-selected model retry (no re-routing).
 """
 
+import json
+import logging
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import User, get_db
 from models import (
     ChatRequest,
     ChatResponse,
-    ModelRecommendation,
     RegenerateRequest,
     RegenerateResponse,
 )
 from services.auth_dependencies import get_current_user
+from services.chat_service import (
+    build_chat_response,
+    build_routing_metadata,
+    persist_chat_turn,
+    prepare_chat_turn,
+)
+from services.model_clients import (
+    _has_groq_key,
+    build_response_from_stream,
+    generate_response,
+    stream_response,
+)
 from services.model_settings import NoModelsEnabledError
-from services.context_builder import build_context
-from services.conversation_store import (
-    get_conversation_or_404,
-    load_message_history,
-    save_chat_turn,
-)
-from services.cost_tracker import (
-    estimate_costs,
-    estimate_enhancement_cost_saved,
-    log_request_metrics,
-)
-from services.model_clients import generate_response
-from services.prompt_analyzer import analyze_prompt
-from services.recommendations import build_top_recommendations
 from services.regenerate_service import regenerate_with_model
-from services.router_engine import route
-from services.prompt_enhancer import format_enhanced_prompt_for_display
+from services.sse import format_sse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+_STREAM_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 @router.post("", response_model=ChatResponse)
@@ -53,7 +63,7 @@ def chat(
     current_user: User = Depends(get_current_user),
 ) -> ChatResponse:
     """
-    Process a user prompt with optional conversation memory.
+    Process a user prompt with optional conversation memory (non-streaming).
 
     1. Load prior messages if conversation_id is provided.
     2. Classify the latest prompt (task type).
@@ -62,27 +72,10 @@ def chat(
     5. Call Groq with system prompt + enhanced conversation context.
     6. Save user + assistant messages and routing metrics.
     """
-    prior_messages: list[dict] = []
-    if request.conversation_id is not None:
-        get_conversation_or_404(db, request.conversation_id, user=current_user)
-        prior_messages = load_message_history(db, request.conversation_id)
-
-    analysis = analyze_prompt(request.prompt)
-
-    context = build_context(
-        request.prompt,
-        analysis,
-        prior_messages=prior_messages,
-        enhance_prompt_enabled=request.enhance_prompt,
-    )
-    enhancement_cost_saved = (
-        0.0
-        if request.enhance_prompt
-        else estimate_enhancement_cost_saved(request.prompt)
-    )
-
     try:
-        decision = route(context, db, current_user.id)
+        analysis, context, decision, enhancement_cost_saved, _prior = prepare_chat_turn(
+            db, current_user, request
+        )
     except NoModelsEnabledError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -92,66 +85,125 @@ def chat(
         messages=context.message_history,
     )
 
-    costs = estimate_costs(decision.model_id, context, model_response)
-    log_request_metrics(decision.model_id, context.task_type, model_response, costs)
-
-    conversation_id, title, user_message_id, assistant_message_id = save_chat_turn(
-        db=db,
-        prompt=request.prompt,
-        response_text=model_response.text,
-        task_type=context.task_type,
-        decision=decision,
-        model_response=model_response,
-        costs=costs,
-        user_id=current_user.id,
-        conversation_id=request.conversation_id,
-        enhanced_prompt=context.enhanced_prompt,
-        system_prompt=context.system_prompt or "",
-        enhancement_reason=context.enhancement_reason,
-        enhancement_method=context.enhancement_method,
-        enhancement_enabled=request.enhance_prompt,
-        enhancement_cost_saved=enhancement_cost_saved,
-        classification_method=analysis.classification_method,
-        classification_reason=analysis.classification_reason,
-        classification_confidence=analysis.confidence,
-    )
-
-    top_recs = build_top_recommendations(
+    conversation_id, title, user_message_id, assistant_message_id, costs = persist_chat_turn(
         db,
-        current_user.id,
-        decision.candidate_models,
+        current_user,
+        request,
+        analysis,
         context,
-        limit=5,
+        decision,
+        model_response,
+        enhancement_cost_saved,
     )
 
-    return ChatResponse(
-        conversation_id=conversation_id,
-        title=title or "",
-        original_prompt=request.prompt,
-        enhanced_prompt=format_enhanced_prompt_for_display(context.enhanced_prompt),
-        system_prompt=context.system_prompt or "",
-        enhancement_reason=context.enhancement_reason,
-        enhancement_method=context.enhancement_method,
-        task_type=context.task_type,
-        classification_confidence=analysis.confidence,
-        classification_reason=analysis.classification_reason,
-        classification_method=analysis.classification_method,
-        selected_model=decision.model_label,
-        selected_model_id=decision.model_id,
-        reason_selected=decision.reason,
-        mock_response=model_response.text,
-        estimated_actual_cost=costs.actual_cost,
-        estimated_premium_cost=costs.premium_cost,
-        estimated_savings_percentage=costs.savings_percentage,
-        preferred_model=decision.preferred_model_id,
-        used_fallback=decision.used_fallback,
-        fallback_message=decision.fallback_message,
-        routing_score=decision.score,
-        candidate_models=decision.candidate_models,
-        top_candidate_scores=decision.candidate_models[:3],
-        top_recommendations=[ModelRecommendation(**r) for r in top_recs],
-        user_message_id=user_message_id,
-        assistant_message_id=assistant_message_id,
+    return build_chat_response(
+        request,
+        analysis,
+        context,
+        decision,
+        model_response,
+        costs,
+        conversation_id,
+        title,
+        user_message_id,
+        assistant_message_id,
+        db,
+        current_user,
+    )
+
+
+@router.post("/stream")
+def chat_stream(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Stream a chat response as Server-Sent Events.
+
+    Events: routing_start, routing_complete, token, complete, error
+    """
+
+    def event_generator():
+        yield format_sse("routing_start", {})
+
+        try:
+            analysis, context, decision, enhancement_cost_saved, _prior = (
+                prepare_chat_turn(db, current_user, request)
+            )
+        except NoModelsEnabledError as exc:
+            yield format_sse("error", {"message": str(exc)})
+            return
+        except Exception as exc:
+            logger.exception("Chat stream preparation failed")
+            yield format_sse("error", {"message": str(exc)})
+            return
+
+        routing_metadata = build_routing_metadata(
+            db, current_user, request, analysis, context, decision
+        )
+        yield format_sse("routing_complete", routing_metadata)
+
+        accumulated = ""
+        start = time.perf_counter()
+        try:
+            for chunk in stream_response(
+                decision.groq_model,
+                context,
+                messages=context.message_history,
+            ):
+                accumulated += chunk
+                yield format_sse("token", {"content": chunk})
+        except Exception as exc:
+            logger.exception("Chat stream generation failed")
+            yield format_sse("error", {"message": str(exc)})
+            return
+
+        latency_ms = (time.perf_counter() - start) * 1000
+        model_response = build_response_from_stream(
+            decision.groq_model,
+            context,
+            accumulated,
+            latency_ms=latency_ms,
+            is_mock=not _has_groq_key(),
+        )
+
+        try:
+            conversation_id, title, user_message_id, assistant_message_id, costs = (
+                persist_chat_turn(
+                    db,
+                    current_user,
+                    request,
+                    analysis,
+                    context,
+                    decision,
+                    model_response,
+                    enhancement_cost_saved,
+                )
+            )
+            response = build_chat_response(
+                request,
+                analysis,
+                context,
+                decision,
+                model_response,
+                costs,
+                conversation_id,
+                title,
+                user_message_id,
+                assistant_message_id,
+                db,
+                current_user,
+            )
+            yield format_sse("complete", json.loads(response.model_dump_json()))
+        except Exception as exc:
+            logger.exception("Chat stream persistence failed")
+            yield format_sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=_STREAM_HEADERS,
     )
 
 
@@ -174,4 +226,3 @@ def regenerate_chat(
         model_id=request.model_id,
     )
     return RegenerateResponse(**result)
-

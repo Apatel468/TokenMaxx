@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { regenerateChat, sendChat } from "../api/chat.js";
+import { regenerateChat, streamChat } from "../api/chat.js";
 
 import { fetchConversation, fetchConversations } from "../api/conversations.js";
 
@@ -60,6 +60,8 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
   const [result, setResult] = useState(null);
 
   const [loading, setLoading] = useState(false);
+
+  const [streamingMessageId, setStreamingMessageId] = useState(null);
 
   const [regeneratingModel, setRegeneratingModel] = useState(null);
 
@@ -180,47 +182,87 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
 
     const optimisticUser = { role: "user", content: trimmed, id: `tmp-${Date.now()}` };
+    const streamId = `stream-${Date.now()}`;
+    const optimisticAssistant = {
+      role: "assistant",
+      content: "",
+      id: streamId,
+      streaming: true,
+      response_label: "Router Selected",
+    };
 
-    setMessages((prev) => [...prev, optimisticUser]);
-
+    setMessages((prev) => [...prev, optimisticUser, optimisticAssistant]);
+    setStreamingMessageId(streamId);
     setPrompt("");
 
 
 
+    let routingApplied = false;
+
     try {
 
-      const data = await sendChat(trimmed, conversationId, enhancePrompts);
+      await streamChat({
+        prompt: trimmed,
+        conversationId,
+        enhancePrompt: enhancePrompts,
+        onRoutingComplete: (routingData) => {
+          routingApplied = true;
+          setResult({
+            ...routingData,
+            mock_response: "",
+            estimated_actual_cost: 0,
+            estimated_premium_cost: 0,
+            estimated_savings_percentage: 0,
+            conversation_id: conversationId,
+            user_message_id: 0,
+            assistant_message_id: 0,
+          });
+        },
+        onToken: ({ content }) => {
+          if (!content) return;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === streamId
+                ? { ...message, content: message.content + content }
+                : message
+            )
+          );
+        },
+        onComplete: async (data) => {
+          setConversationId(data.conversation_id);
+          if (data.title?.trim()) {
+            setConversationTitle(data.title.trim());
+          }
 
-      setConversationId(data.conversation_id);
-
-      if (data.title?.trim()) {
-        setConversationTitle(data.title.trim());
-      }
-
-      const detail = await fetchConversation(data.conversation_id);
-
-      setConversationTitle(detail.title?.trim() || data.title?.trim() || null);
-
-      setMessages(detail.messages);
-
-      setResult(data);
-
-
-
-      loadConversationList();
-
-      if (onChatComplete) onChatComplete();
+          const detail = await fetchConversation(data.conversation_id);
+          setConversationTitle(detail.title?.trim() || data.title?.trim() || null);
+          setMessages(detail.messages);
+          setResult(data);
+          loadConversationList();
+          if (onChatComplete) onChatComplete();
+        },
+        onError: (errorData) => {
+          throw new Error(errorData?.message || "Streaming failed.");
+        },
+      });
 
     } catch (err) {
 
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticUser.id));
-
+      setMessages((prev) =>
+        prev.filter(
+          (message) => message.id !== optimisticUser.id && message.id !== streamId
+        )
+      );
+      if (!routingApplied) {
+        setResult(null);
+      }
       setPrompt(trimmed);
 
       setError(err.message || "Could not reach the backend.");
 
     } finally {
 
+      setStreamingMessageId(null);
       setLoading(false);
 
     }
@@ -364,6 +406,8 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                 msg.response_label === "User Selected Model" &&
                 msg.selected_model;
 
+              const isStreaming = msg.id === streamingMessageId || msg.streaming;
+
               return (
 
               <div
@@ -389,19 +433,30 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                       originalPrompt={msg.original_prompt}
                       enhancedPrompt={msg.enhanced_prompt}
                       enhancementMethod={msg.enhancement_method}
+                      promptAnalysis={msg.prompt_analysis}
                     />
                   </>
                 ) : (
                   <>
                     <span className="thread-msg__role">
-                      {msg.response_label || "Assistant"}
+                      {isStreaming && !msg.content
+                        ? "Assistant (typing…)"
+                        : msg.response_label || "Assistant"}
                     </span>
-                    <p className="thread-msg__text">{msg.content}</p>
-                    <PromptEnhancementViewer
-                      originalPrompt={msg.original_prompt}
-                      enhancedPrompt={msg.enhanced_prompt}
-                      enhancementMethod={msg.enhancement_method}
-                    />
+                    <p className="thread-msg__text">
+                      {msg.content}
+                      {isStreaming && (
+                        <span className="thread-msg__cursor" aria-hidden="true" />
+                      )}
+                    </p>
+                    {!isStreaming && (
+                      <PromptEnhancementViewer
+                        originalPrompt={msg.original_prompt}
+                        enhancedPrompt={msg.enhanced_prompt}
+                        enhancementMethod={msg.enhancement_method}
+                        promptAnalysis={msg.prompt_analysis}
+                      />
+                    )}
                   </>
                 )}
 
@@ -411,7 +466,7 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
             })}
 
-            {loading && (
+            {loading && !streamingMessageId && (
 
               <div className="loading-state loading-state--inline">
 

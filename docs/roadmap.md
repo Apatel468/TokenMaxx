@@ -1,54 +1,46 @@
 # TokenMaxx — Roadmap
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.3.3 · **Last updated:** June 2026
+> **Version:** 0.4.0 · **Last updated:** June 2026
 
 ---
 
 ## Completed Milestones
 
-### M1–M11
-- [x] MVP backend, frontend, Groq/LiteLLM, analytics, multi-turn memory, docs, TokenMaxx rebrand
-
-### M12 — Dynamic Router & Model Controls (v0.3.0)
-- [x] Composite scoring router, Model Controls UI, fallback routing, routing_score in chat response
-
-### M13 — Auth & Admin (v0.3.1)
-- [x] JWT auth, per-user data, two-tier model settings, unified `/model-settings`, admin dashboard
-
-### M14 — Preferences, Regenerate & Allowlist (v0.3.2)
-- [x] User prompt enhancement toggle (`GET/PUT /user/preferences`)
-- [x] `POST /chat/regenerate` — on-demand model retry (one LLM call per click)
-- [x] Top-5 recommendations in routing panel with availability + disabled reasons
-- [x] Groq model allowlist (6 chat + whisper audio-only)
-- [x] Stale SQLite model settings cleanup on startup
-- [x] Regenerated message UI: "User switched model to …"
-- [x] Analytics UI simplified (cost/savings focus; enhancement/regen metrics hidden)
+### M1–M14
+- [x] MVP through auth, admin, regenerate, allowlist, analytics (see prior releases)
 
 ### M15 — Quality & Polish (v0.3.3)
-- [x] LLM task classifier (`llm_classifier.py`) with keyword fallback
-- [x] Task-aware routing — complexity score, dynamic weights, task-specific bonuses
-- [x] Top-3 candidate scores in Latest Routing panel for debugging
-- [x] Classification confidence + reason in routing UI
-- [x] Prompt enhancement viewer (original vs enhanced prompt)
-- [x] Model settings sync fix (`explicitly_set`, `sync_user_model_settings`)
-- [x] pytest suite — auth, chat, classifier, routing, model settings (30 tests)
-- [x] Analytics CSV export (`tokenmaxx-analytics-report.csv`)
+- [x] LLM task classifier + keyword fallback
+- [x] Task-aware routing (complexity score, dynamic weights, task bonuses)
+- [x] Top-3 candidate scores in routing panel
+- [x] Prompt enhancement viewer (original vs enhanced)
+- [x] Model settings sync (`explicitly_set`)
+- [x] pytest suite + analytics CSV export
+
+### M16 — Streaming & Prompt Intelligence (v0.4.0)
+- [x] SSE streaming — `POST /chat/stream` with `routing_start`, `routing_complete`, `token`, `complete`, `error`
+- [x] Real Groq streaming via LiteLLM; word-by-word fallback
+- [x] Frontend live token display + typing cursor
+- [x] Prompt Intelligence Engine v2 — analyze then enhance by task, complexity, persona
+- [x] `PromptAnalysis` metadata in API + UI (task, complexity, persona, strategy)
+- [x] Clean enhanced prompts (no internal bracket notes)
+- [x] Tests: `test_chat_stream.py`, `test_prompt_intelligence.py` (39 total)
 
 ---
 
 ## Current Milestone
 
-**M16 — Streaming & API Polish**
+**M17 — API Polish & Production Prep**
 
 | Task | Status |
 |------|--------|
-| SSE streaming | ⬜ |
 | Rename `mock_response` → `response` | ⬜ |
 | Context window truncation | ⬜ |
 | `VITE_API_BASE` env for frontend | ⬜ |
 | Mobile layout | ⬜ |
 | Analytics PDF export | ⬜ |
+| Streaming regenerate | ⬜ |
 | Tune registry scores from real usage | ⬜ |
 | Whisper speech-to-text UI | ⬜ |
 
@@ -64,16 +56,16 @@
 
 ## Production Readiness
 
-**Current score:** ~75% production ready
+**Current score:** ~80% production ready
 
 | Area | Status |
 |------|--------|
 | Core routing | ✅ Task-aware complexity scoring |
+| Prompt Intelligence | ✅ v2 analyze + enhance |
+| Streaming chat | ✅ SSE `/chat/stream` |
 | Task classification | ✅ LLM + keyword fallback |
-| Model regenerate | ✅ On-demand |
-| User preferences | ✅ Enhancement + model toggles |
+| Model regenerate | ✅ On-demand (non-streaming) |
 | Authentication | ✅ JWT + roles |
-| Admin visibility | ✅ Employee usage |
 | Analytics export | ✅ CSV (client-side) |
-| Tests | ✅ 30 pytest tests |
+| Tests | ✅ 39 pytest tests |
 | Deploy | ❌ Local only |

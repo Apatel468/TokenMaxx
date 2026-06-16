@@ -2,16 +2,16 @@
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
 > **Permanent project context.** This file is the single source of truth when chat history is unavailable.  
-> **Version:** 0.3.3 · **Last audited:** June 2026  
+> **Version:** 0.4.0 · **Last audited:** June 2026  
 > **GitHub:** https://github.com/Apatel468/TokenMaxx (redirects from `smartllm-router`)
 
 ---
 
 ## Project Vision
 
-**TokenMaxx** — *Maximum Intelligence, Minimum Cost* — is an enterprise-style demo/MVP that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves **LLM-powered task classification**, **task-aware model selection**, **optional prompt engineering**, **org-wide and per-user model toggles**, **on-demand model regeneration**, **JWT authentication**, **admin usage visibility**, **analytics export**, and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
+**TokenMaxx** — *Maximum Intelligence, Minimum Cost* — is an enterprise-style demo/MVP that intelligently routes user prompts to the most cost-effective AI model while maintaining acceptable quality. It proves **LLM-powered task classification**, **Prompt Intelligence Engine v2**, **task-aware model selection**, **SSE streaming responses**, **org-wide and per-user model toggles**, **on-demand model regeneration**, **JWT authentication**, **admin usage visibility**, **analytics export**, and **cost savings tracking** compared to always using an expensive premium model (GPT-4o baseline).
 
-The product narrative: *"Maximum Intelligence, Minimum Cost — classify the request with an LLM, optionally engineer the prompt, score allowed Groq models with task-specific bonuses, route to the best enabled option for this user, let them retry with another model on demand, and show how much you saved."*
+The product narrative: *"Maximum Intelligence, Minimum Cost — classify the request, analyze and enhance the prompt by task and complexity, score allowed Groq models with task-specific bonuses, stream the response live, route to the best enabled option, let users retry with another model on demand, and show how much you saved."*
 
 ---
 
@@ -21,17 +21,18 @@ Organizations and developers often default to one expensive LLM (e.g. GPT-4o) fo
 
 1. **Authenticates** users with JWT so chats and analytics are per-account
 2. **Classifies** what kind of task the user is asking for (LLM classifier with keyword fallback)
-3. **Optionally enhances** the prompt (user toggle; AI agent or rule fallback)
+3. **Analyzes and enhances** prompts via Prompt Intelligence v2 (task type, complexity, persona, strategy)
 4. **Scores** allowlisted Groq chat models using registry metadata, complexity-aware weights, and task-specific bonuses
 5. **Routes** to the highest-scoring **available** model (`admin_enabled AND user_enabled`)
-6. **Lets users regenerate** with any other allowed model — one LLM call per click, no upfront multi-model cost
-7. **Tracks** estimated token cost vs. a premium baseline
-8. **Persists** conversations, titles, and analytics per user
-9. **Reports** employee usage to admins and exports analytics as CSV for demos
+6. **Streams** assistant responses token-by-token over SSE (`POST /chat/stream`)
+7. **Lets users regenerate** with any other allowed model — one LLM call per click
+8. **Tracks** estimated token cost vs. a premium baseline
+9. **Persists** conversations, titles, and analytics per user
+10. **Reports** employee usage to admins and exports analytics as CSV for demos
 
 ---
 
-## Groq Model Allowlist (v0.3.3)
+## Groq Model Allowlist (v0.4.0)
 
 Only models in `GROQ_MODEL_ALLOWLIST` (`config/model_registry.py`) are synced, routed, and shown in Model Controls.
 
@@ -47,8 +48,6 @@ Only models in `GROQ_MODEL_ALLOWLIST` (`config/model_registry.py`) are synced, r
 
 **To change allowlist:** edit `GROQ_MODEL_ALLOWLIST` and `MODEL_REGISTRY` in `model_registry.py`. Stale SQLite settings rows are cleaned on startup via `cleanup_stale_model_settings()`.
 
-Historical `model_runs` with removed model ids remain in analytics unchanged.
-
 ---
 
 ## High-Level Architecture
@@ -58,26 +57,26 @@ Historical `model_runs` with removed model ids remain in analytics unchanged.
 │  React + Vite Frontend (localhost:5173 or 5174)                  │
 │  Auth gate → Login / Signup                                        │
 │  Tabs: Chat | Analytics | Model Controls | Admin (admins only)     │
-│  JWT in localStorage (tokenmaxx_token) via api/http.js             │
+│  Chat uses POST /chat/stream (SSE) + fetch ReadableStream          │
 └────────────────────────────┬─────────────────────────────────────┘
-                             │ REST JSON + Authorization: Bearer
+                             │ REST JSON + SSE + Authorization: Bearer
                              │ → http://127.0.0.1:8001
 ┌────────────────────────────▼─────────────────────────────────────┐
 │  FastAPI Backend (127.0.0.1:8001)                                │
 │  Public: /auth/* /health                                         │
-│  Protected: /chat /chat/regenerate /conversations /analytics/*   │
-│             /models /model-settings /user/preferences /admin/*   │
+│  Protected: /chat /chat/stream /chat/regenerate /conversations   │
+│             /analytics/* /models /model-settings /admin/*          │
 └────────────────────────────┬─────────────────────────────────────┘
                              │
      ┌───────────────────────┼───────────────────────┐
      ▼                       ▼                       ▼
  auth_service           prompt_analyzer         router_engine
- user_preferences       llm_classifier          (allowlist + scorer)
- regenerate_service     prompt_enhancer         context_builder
+ user_preferences       llm_classifier          model_scorer
+ regenerate_service     prompt_intelligence v2  context_builder
      │                       │                       │
-     └──────────► model_clients (LiteLLM → Groq) ◄──┘
+     └──────────► model_clients (LiteLLM → Groq, stream + sync) ◄──┘
                              │
-              cost_tracker + conversation_store
+              cost_tracker + conversation_store + chat_service
                              │
                              ▼
               SQLite: smartllm_router.db
@@ -88,6 +87,7 @@ Historical `model_runs` with removed model ids remain in analytics unchanged.
 - **Follow-up turns:** up to **3 Groq calls** — classifier, enhancer, response model
 - **Enhancement OFF:** skips enhancer call (saves cost/latency)
 - **Regenerate click:** **1 Groq call only** — reuses stored prompts; no re-classify/route
+- **Frontend default:** `POST /chat/stream` (SSE); `POST /chat` still available for sync
 
 ---
 
@@ -97,6 +97,7 @@ Historical `model_runs` with removed model ids remain in analytics unchanged.
 |-------|------------|
 | Backend API | Python 3, FastAPI 0.109+ |
 | Server | Uvicorn |
+| Streaming | Server-Sent Events (`StreamingResponse`) |
 | ORM / DB | SQLAlchemy 2.x, SQLite |
 | Auth | bcrypt, PyJWT (HS256 Bearer tokens) |
 | LLM gateway | LiteLLM 1.40+ |
@@ -104,7 +105,7 @@ Historical `model_runs` with removed model ids remain in analytics unchanged.
 | Config | YAML (`config/models.yaml`), Python registry (`config/model_registry.py`) |
 | Frontend | React 18, Vite 6 |
 | Styling | Plain CSS |
-| Tests | pytest, httpx (TestClient) |
+| Tests | pytest, httpx (TestClient) — **39 tests** |
 
 ---
 
@@ -115,23 +116,22 @@ TokenMaxx/
 ├── backend/
 │   ├── config/
 │   │   ├── models.yaml
-│   │   └── model_registry.py      # GROQ_MODEL_ALLOWLIST + metadata
+│   │   └── model_registry.py
 │   ├── routers/
-│   │   ├── auth.py, admin.py, chat.py
-│   │   ├── model_settings_route.py, user_preferences.py
-│   │   └── conversations.py, analytics.py, models.py, settings.py
+│   │   ├── auth.py, admin.py, chat.py      # /chat, /chat/stream, /chat/regenerate
+│   │   └── conversations.py, analytics.py, ...
 │   ├── services/
-│   │   ├── auth_service.py, user_preferences.py
-│   │   ├── llm_classifier.py      # LLM task classification
-│   │   ├── regenerate_service.py, recommendations.py
-│   │   ├── router_engine.py, model_scorer.py, groq_models.py
-│   │   ├── model_settings.py, context_builder.py, conversation_store.py
-│   │   └── prompt_analyzer.py, prompt_enhancer.py
-│   └── tests/                     # pytest suite (30 tests)
+│   │   ├── prompt_intelligence.py   # Prompt Intelligence Engine v2
+│   │   ├── prompt_enhancer.py       # thin wrapper → prompt_intelligence
+│   │   ├── llm_classifier.py
+│   │   ├── chat_service.py          # shared sync + stream pipeline
+│   │   ├── model_scorer.py, router_engine.py
+│   │   └── model_clients.py         # generate_response + stream_response
+│   └── tests/                       # 39 pytest tests
 ├── frontend/src/
-│   ├── components/ ChatPage, AnalyticsDashboard, ModelControls, PromptEnhancementViewer, ...
-│   ├── utils/ exportAnalyticsReport.js, conversationTitle.js
-│   └── api/ chat.js, preferences.js, settings.js, analytics.js, ...
+│   ├── components/ ChatPage, PromptEnhancementViewer, AnalyticsDashboard, ...
+│   ├── api/ chat.js                 # streamChat() + regenerateChat()
+│   └── utils/ exportAnalyticsReport.js
 └── docs/
 ```
 
@@ -143,110 +143,122 @@ TokenMaxx/
 |------|--------|
 | Backend core pipeline | ✅ Complete |
 | Groq allowlist (6 chat models) | ✅ Complete |
-| LLM task classifier + keyword fallback | ✅ Complete (v0.3.3) |
-| Task-aware complexity routing | ✅ Complete (v0.3.3) |
+| LLM task classifier + keyword fallback | ✅ Complete |
+| Prompt Intelligence Engine v2 | ✅ Complete (v0.4.0) |
+| Task-aware complexity routing | ✅ Complete |
+| SSE streaming chat (`POST /chat/stream`) | ✅ Complete (v0.4.0) |
 | Model Controls — org + personal toggles | ✅ Complete |
 | JWT auth + admin dashboard | ✅ Complete |
 | User prompt enhancement toggle | ✅ Complete |
-| Prompt enhancement viewer (original vs enhanced) | ✅ Complete (v0.3.3) |
+| Prompt optimization viewer (v2 metadata) | ✅ Complete (v0.4.0) |
 | Model regenerate (on-demand) | ✅ Complete |
-| Top-5 recommendations in routing panel | ✅ Complete |
-| Top-3 candidate scores in routing panel | ✅ Complete (v0.3.3) |
-| Analytics (cost, savings, model usage) | ✅ Complete |
-| Analytics CSV export | ✅ Complete (v0.3.3) |
-| pytest suite (auth, chat, routing, classifier) | ✅ Complete (v0.3.3) |
-| Streaming responses | ❌ Not started |
+| Top-5 recommendations + top-3 candidate scores | ✅ Complete |
+| Analytics + CSV export | ✅ Complete |
+| pytest suite | ✅ Complete (39 tests) |
 
 ---
 
-## Task Classification (v0.3.3)
+## Prompt Intelligence Engine v2 (v0.4.0)
+
+**Service:** `backend/services/prompt_intelligence.py` (via `prompt_enhancer.enhance_prompt`)
+
+Analyze first, then enhance based on task type, complexity (0–100), and persona.
+
+### PromptAnalysis fields
+
+| Field | Description |
+|-------|-------------|
+| `original_prompt` | Exactly what the user typed |
+| `task_type` | Normalized enhancement task (see below) |
+| `complexity_score` | 0–100 |
+| `complexity_level` | `simple`, `medium`, or `complex` |
+| `persona` | Expert role for the downstream model |
+| `output_format` | Expected response structure |
+| `enhancement_strategy` | e.g. `minimal_clarity`, `structured_clarity`, `full_specification_*` |
+| `enhanced_prompt` | Clean prompt sent to the model (no internal bracket notes) |
+
+### Supported enhancement task types
+
+`general_qa`, `coding`, `reasoning`, `writing`, `summarization`, `research`, `business`, `education`, `creative`, `data_analysis`
+
+(Router task types like `report` → `business`, `math` → `reasoning` are normalized automatically.)
+
+### Personas
+
+| Task | Persona |
+|------|---------|
+| coding | Senior Software Engineer |
+| business | Business Consultant |
+| research | Research Analyst |
+| writing | Professional Editor |
+| education | Teacher/Tutor |
+| data_analysis | Data Analyst |
+| general_qa | Helpful Expert |
+
+### Enhancement by complexity
+
+| Level | Strategy | Behavior |
+|-------|----------|----------|
+| Simple (≤33) | `minimal_clarity` | Light touch; short Q&A often unchanged |
+| Medium (34–66) | `structured_clarity` | Adds structure + output format |
+| Complex (67+) | `full_specification_*` | Assumptions, constraints, steps, output format |
+
+Returned in `ChatResponse.prompt_analysis` and stored on `model_runs`. UI: collapsible **View Prompt Optimization** panel.
+
+---
+
+## Task Classification (routing)
 
 | Step | Service | Model | Fallback |
 |------|---------|-------|----------|
 | 1 | `llm_classifier.py` | `llama-3.1-8b-instant` | Keyword rules in `prompt_analyzer.py` |
 
-Returns `{ task_type, confidence, reason }`. Stored on `model_runs` and returned in `ChatResponse` as `classification_confidence` and `classification_reason`.
-
-**Task types:** `general_qa`, `classification`, `coding`, `math`, `reasoning`, `writing`, `summarization`, `report`, `creative`, `research`
+**Routing task types:** `general_qa`, `classification`, `coding`, `math`, `reasoning`, `writing`, `summarization`, `report`, `creative`, `research`
 
 ---
 
-## Task-Aware Routing (v0.3.3)
+## Task-Aware Routing
 
-Routing no longer lets cheap/fast models dominate every prompt. The scorer uses:
-
-1. **Complexity score** (0–1) — prompt length, task type, complexity keywords
-2. **Dynamic weights** — cost/speed matter more for simple prompts; reasoning/task matter more for complex ones
+1. **Complexity score** (0–1) — prompt length, task type, keywords
+2. **Dynamic weights** — cost/speed ↓ as complexity ↑
 3. **Task-specific model bonuses** — steers picks per task type
 
 | Task | Preferred models |
 |------|------------------|
-| Simple Q&A / classification | `llama-3.1-8b-instant` |
+| Simple Q&A | `llama-3.1-8b-instant` |
 | Coding / math | `qwen/qwen3-32b` |
-| Writing / reports / summaries | `llama-3.3-70b-versatile`, `llama-4-scout` |
-| Deep reasoning / research | `openai/gpt-oss-120b` |
-| Balanced fallback | `openai/gpt-oss-20b` (available but not dominant) |
-
-`ChatResponse.top_candidate_scores` returns the top 3 scored candidates for debugging in the Latest Routing panel.
+| Writing / reports | `llama-3.3-70b-versatile`, `llama-4-scout` |
+| Deep reasoning | `openai/gpt-oss-120b` |
+| Balanced fallback | `openai/gpt-oss-20b` |
 
 ---
 
-## User Preferences (v0.3.2)
-
-| Setting | Default | API |
-|---------|---------|-----|
-| `enhance_prompts` | `true` | `GET/PUT /user/preferences` |
-
-Also returned on `GET /auth/me` as `enhance_prompts`. Toggle in **Model Controls** tab; saves immediately. When off, `POST /chat` sends `enhance_prompt: false` and skips `enhance_prompt()`.
-
----
-
-## Model Regenerate (v0.3.2)
+## SSE Streaming (v0.4.0)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/chat/regenerate` | Retry a turn with user-selected model |
+| POST | `/chat/stream` | Stream chat via Server-Sent Events |
+| POST | `/chat` | Non-streaming (unchanged; used in tests) |
 
-**Request:** `{ conversation_id, message_id, model_id }` — `message_id` is the **user message** for that turn.
+**SSE events:** `routing_start` → `routing_complete` → `token` (×N) → `complete` / `error`
 
-**Behavior:**
-- Reuses stored enhanced prompt, system prompt, and conversation context
-- Does **not** re-classify, re-enhance, or re-route
-- **One LLM call per click** — no pre-generation of all top-5 models
-- Appends new assistant message; original router response kept
-- UI: `User switched model to "{model_id}"` above regenerated text
-- Router-selected replies labeled **Router Selected**
-
-`POST /chat` returns `top_recommendations` (top 5 with cost/latency estimates and availability) for clickable chips in the routing panel.
+- Real Groq streaming via LiteLLM `stream=True`; word-by-word fallback when unavailable
+- DB save only after stream completes
+- `routing_complete` includes routing metadata for Latest Routing panel
+- Frontend: `streamChat()` in `api/chat.js`; live typing cursor in `ChatPage.jsx`
 
 ---
 
-## Model Controls (v0.3.1+)
-
-**Effective availability:** `available = admin_enabled AND user_enabled`
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/model-settings` | All allowlisted chat models + toggle state |
-| PUT | `/model-settings` | UPSERT toggles (admin → org, user → personal) |
-
-Also includes **Prompt Enhancement** toggle (user preference).
-
-User model settings use `explicitly_set` to distinguish user intent from stale defaults; `sync_user_model_settings()` backfills missing rows without overwriting explicit disables.
-
----
-
-## POST /chat Pipeline
+## POST /chat Pipeline (sync)
 
 ```
 1. JWT → user_id
 2. Load prior messages (optional conversation_id)
 3. analyze_prompt() — LLM classify (keyword fallback)
-4. build_context(enhance_prompt_enabled=request.enhance_prompt)
-5. route(context, db, user_id) — complexity-aware score of available models
+4. build_context() — Prompt Intelligence v2 (if enhancement ON)
+5. route() — complexity-aware score of available models
 6. generate_response()
-7. estimate_costs() + save_chat_turn (label: "Router Selected")
-8. ChatResponse + top_recommendations + top_candidate_scores + classification metadata
+7. save_chat_turn() + ChatResponse (incl. prompt_analysis)
 ```
 
 ---
@@ -255,50 +267,26 @@ User model settings use `explicitly_set` to distinguish user intent from stale d
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| GET | `/health` | — | Liveness |
-| POST | `/auth/signup` | — | Register |
-| POST | `/auth/login` | — | Login → JWT |
-| GET | `/auth/me` | Bearer | Profile + `enhance_prompts` |
-| GET | `/user/preferences` | Bearer | User settings |
-| PUT | `/user/preferences` | Bearer | Save settings |
-| POST | `/chat` | Bearer | Full pipeline; `enhance_prompt` optional |
+| POST | `/chat` | Bearer | Full pipeline (non-streaming) |
+| POST | `/chat/stream` | Bearer | SSE streaming pipeline |
 | POST | `/chat/regenerate` | Bearer | User-selected model retry |
-| GET | `/conversations` | Bearer | List threads |
-| GET | `/conversations/{id}` | Bearer | Full thread + enhancement metadata |
+| GET | `/conversations/{id}` | Bearer | Thread + `prompt_analysis` on messages |
 | GET | `/analytics/summary` | Bearer | Cost/savings KPIs |
 | GET | `/analytics/history` | Bearer | Recent runs |
 | GET | `/analytics/model-usage` | Bearer | Per-model stats |
 | GET | `/model-settings` | Bearer | Model Controls |
 | PUT | `/model-settings` | Bearer | Save model toggles |
 | GET | `/admin/employee-usage` | Admin | Org-wide usage |
-| GET | `/docs` | — | Swagger UI |
 
-### Analytics UI (displayed)
-
-Total Chats, Actual Cost, Premium Cost, Total Savings, Savings %, Model Usage table, Recent Conversations, **Export Report** (CSV download).
-
-Enhancement/regeneration metrics are tracked in DB but **not shown** in the dashboard KPI cards.
-
-### ChatResponse routing metadata
+### ChatResponse key fields
 
 | Field | Purpose |
 |-------|---------|
-| `task_type` | Classified task |
-| `classification_confidence` | LLM classifier confidence (0–1) |
-| `classification_reason` | Why this task type was chosen |
-| `top_candidate_scores` | Top 3 model scores for debugging |
-| `top_recommendations` | Top 5 models for regenerate chips |
-
----
-
-## Environment Variables
-
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `GROQ_API_KEY` | Optional* | Chat, classifier, enhancer, title, catalog sync |
-| `JWT_SECRET` | Recommended | HS256 signing key |
-| `JWT_EXPIRE_HOURS` | Optional | Token lifetime (default 168) |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Optional | Seed admin on startup |
+| `prompt_analysis` | Prompt Intelligence v2 metadata |
+| `classification_confidence` / `classification_reason` | Task classifier |
+| `top_candidate_scores` | Top 3 routing scores |
+| `top_recommendations` | Top 5 regenerate chips |
+| `mock_response` | Assistant text (legacy field name) |
 
 ---
 
@@ -307,18 +295,13 @@ Enhancement/regeneration metrics are tracked in DB but **not shown** in the dash
 ```bash
 cd backend && source venv/bin/activate && uvicorn main:app --reload --port 8001
 cd frontend && npm run dev
-```
-
-```bash
-cd backend && source venv/bin/activate && pytest -v   # run tests
+cd backend && source venv/bin/activate && pytest -v
 ```
 
 | What | URL |
 |------|-----|
 | App | http://localhost:5173 |
 | API docs | http://127.0.0.1:8001/docs |
-
-**Windows:** use `venv\Scripts\activate` instead of `source venv/bin/activate`.
 
 ---
 
@@ -328,7 +311,8 @@ cd backend && source venv/bin/activate && pytest -v   # run tests
 - `ChatResponse.mock_response` legacy field name
 - No Alembic migrations
 - JWT stateless — no server-side revoke
-- PDF analytics export not yet implemented (CSV only)
+- Analytics PDF export not yet implemented (CSV only)
+- Regenerate remains non-streaming
 
 ---
 
@@ -345,15 +329,13 @@ RUN:
   cd backend && pytest -v
 
 KEY FILES:
-- backend/config/model_registry.py     # GROQ_MODEL_ALLOWLIST
-- backend/services/llm_classifier.py   # LLM task classification
-- backend/services/model_scorer.py     # Task-aware routing scores
-- backend/services/router_engine.py
-- backend/services/regenerate_service.py
-- backend/routers/chat.py
+- backend/services/prompt_intelligence.py  # Prompt Intelligence v2
+- backend/services/model_scorer.py           # Task-aware routing
+- backend/routers/chat.py                    # /chat, /chat/stream, /chat/regenerate
+- backend/services/chat_service.py           # Shared pipeline
+- frontend/src/api/chat.js                   # streamChat()
 - frontend/src/components/ChatPage.jsx
-- frontend/src/components/AnalyticsDashboard.jsx
-- frontend/src/utils/exportAnalyticsReport.js
+- frontend/src/components/PromptEnhancementViewer.jsx
 
 GITHUB: https://github.com/Apatel468/TokenMaxx
 CONSTRAINTS: Groq allowlist only, port 8001, never read/log .env

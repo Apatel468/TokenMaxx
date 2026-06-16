@@ -11,13 +11,14 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from database import Conversation, Message, ModelRun, User
-from models import ConversationDetail, ConversationListItem, MessageOut
+from models import ConversationDetail, ConversationListItem, MessageOut, PromptAnalysisOut
 from services.cost_tracker import CostEstimate
 from services.model_clients import ModelResponse
 from services.conversation_title import generate_conversation_title
 from services.timezone_utils import format_timestamp_eastern
 from services.router_engine import RoutingDecision
 from services.prompt_enhancer import format_enhanced_prompt_for_display
+from services.prompt_intelligence import PromptAnalysis
 
 ROUTER_LABEL = "Router Selected"
 REGENERATE_LABEL = "User Selected Model"
@@ -35,6 +36,58 @@ def _selected_model_for_message(db: Session, message: Message) -> str:
     if not run:
         return ""
     return run.regenerated_model or run.selected_model or ""
+
+
+def _prompt_analysis_for_assistant(
+    db: Session, message: Message
+) -> PromptAnalysisOut | None:
+    """Load Prompt Intelligence v2 metadata for an assistant turn."""
+    if message.role != "assistant":
+        return None
+
+    run = (
+        db.query(ModelRun)
+        .filter(ModelRun.assistant_message_id == message.id)
+        .first()
+    )
+    if not run or run.prompt_complexity_level is None:
+        return None
+
+    original = ""
+    if run.turn_user_message_id:
+        user_msg = (
+            db.query(Message)
+            .filter(Message.id == run.turn_user_message_id)
+            .first()
+        )
+        if user_msg:
+            original = user_msg.content
+
+    if not original:
+        prior_user = (
+            db.query(Message)
+            .filter(
+                Message.conversation_id == message.conversation_id,
+                Message.role == "user",
+                Message.created_at < message.created_at,
+            )
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        if prior_user:
+            original = prior_user.content
+
+    enhanced = format_enhanced_prompt_for_display(run.enhanced_prompt or "") or original
+    return PromptAnalysisOut(
+        original_prompt=original,
+        task_type=run.prompt_enhancement_task_type or run.task_type or "general_qa",
+        complexity_score=int(run.prompt_complexity_score or 0),
+        complexity_level=run.prompt_complexity_level or "medium",
+        persona=run.prompt_persona or "",
+        output_format=run.prompt_output_format or "",
+        enhancement_strategy=run.enhancement_strategy or "",
+        enhanced_prompt=enhanced,
+    )
 
 
 def _prompt_enhancement_for_assistant(
@@ -211,6 +264,7 @@ def save_chat_turn(
     classification_method: str = "",
     classification_reason: str = "",
     classification_confidence: float = 0.0,
+    prompt_analysis: PromptAnalysis | None = None,
 ) -> tuple[int, str | None, int, int]:
     """Save one user message + assistant reply (+ model_run). Returns ids."""
     if conversation_id:
@@ -267,6 +321,20 @@ def save_chat_turn(
         classification_method=classification_method or None,
         classification_reason=classification_reason or None,
         classification_confidence=classification_confidence or None,
+        prompt_complexity_score=(
+            prompt_analysis.complexity_score if prompt_analysis else None
+        ),
+        prompt_complexity_level=(
+            prompt_analysis.complexity_level if prompt_analysis else None
+        ),
+        prompt_persona=prompt_analysis.persona if prompt_analysis else None,
+        prompt_output_format=prompt_analysis.output_format if prompt_analysis else None,
+        prompt_enhancement_task_type=(
+            prompt_analysis.task_type if prompt_analysis else None
+        ),
+        enhancement_strategy=(
+            prompt_analysis.enhancement_strategy if prompt_analysis else None
+        ),
     )
     db.add(model_run)
 
@@ -337,6 +405,7 @@ def get_conversation_detail(
         original_prompt, enhanced_prompt, enhancement_method = (
             _prompt_enhancement_for_assistant(db, m)
         )
+        prompt_analysis = _prompt_analysis_for_assistant(db, m)
         message_rows.append(
             MessageOut(
                 id=m.id,
@@ -347,6 +416,7 @@ def get_conversation_detail(
                 original_prompt=original_prompt,
                 enhanced_prompt=enhanced_prompt,
                 enhancement_method=enhancement_method,
+                prompt_analysis=prompt_analysis,
                 created_at=format_timestamp_eastern(m.created_at),
             )
         )
