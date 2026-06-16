@@ -13,10 +13,11 @@ Then open:
 
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from dotenv import load_dotenv
 
-# Load API keys from backend/.env before anything else imports model_clients
+# Load backend/.env locally; on Render, variables come from the dashboard.
 load_dotenv()
 
 # Show INFO logs (LiteLLM calls, token counts, costs) in the terminal
@@ -27,8 +28,9 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from database import init_db
+from database import engine, init_db
 from routers import (
     admin,
     analytics,
@@ -43,6 +45,33 @@ from routers import (
 from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
+API_VERSION = "0.4.0"
+
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
+
+def _cors_origins() -> list[str]:
+    """Comma-separated CORS_ORIGINS env var, or local dev defaults."""
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        return _DEFAULT_CORS_ORIGINS
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def _database_health() -> dict:
+    """Lightweight DB probe for Render health checks."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Database health check failed: %s", exc)
+        return {"status": "error", "detail": "database_unreachable"}
 
 
 @asynccontextmanager
@@ -63,19 +92,13 @@ app = FastAPI(
         f"{TAGLINE}. Routes user prompts to the best AI model based on task type, "
         "cost, and quality — and tracks savings vs. always using premium."
     ),
-    version="0.2.2",
+    version=API_VERSION,
     lifespan=lifespan,
 )
 
-# Allow the React frontend (different port) to call this API during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,14 +119,18 @@ app.include_router(settings.router)
 @app.get("/health")
 def health_check():
     """
-    Simple liveness check.
+    Liveness/readiness check for Render and load balancers.
 
-    Returns 200 with a JSON body so load balancers and the frontend
-    can confirm the API is running.
+    Returns 200 when the process is up. Includes database probe status.
     """
+    database = _database_health()
+    overall_ok = database["status"] == "ok"
+
     return {
-        "status": "ok",
+        "status": "ok" if overall_ok else "degraded",
         "service": "TokenMaxx",
         "tagline": TAGLINE,
-        "version": "0.2.2",
+        "version": API_VERSION,
+        "database": database,
+        "groq_configured": bool(os.getenv("GROQ_API_KEY", "").strip()),
     }

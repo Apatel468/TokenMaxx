@@ -45,7 +45,7 @@ function AnalyticsDashboard({ onRefresh }) {
     } catch (err) {
       setError(
         err.message ||
-          "Could not load analytics. Is the backend running on port 8001?"
+          "Could not load analytics. Check VITE_API_BASE and that the backend is running."
       );
     } finally {
       setLoading(false);

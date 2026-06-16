@@ -27,7 +27,7 @@ TokenMaxx routes user prompts to the most cost-effective Groq model for each tas
 cd backend
 python -m venv venv
 source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env             # add GROQ_API_KEY, JWT_SECRET
 uvicorn main:app --reload --port 8001
 ```
@@ -45,6 +45,14 @@ npm run dev
 ```bash
 cd backend && source venv/bin/activate && pytest -v
 ```
+
+## Deploy backend (Render)
+
+See [docs/deploy-render.md](docs/deploy-render.md) for build/start commands, env vars, persistent SQLite disk, and health checks.
+
+## Deploy frontend (Vercel)
+
+See [docs/deploy-vercel.md](docs/deploy-vercel.md). Set `VITE_API_BASE` to your deployed API URL.
 
 ### URLs
 
@@ -66,3 +74,5 @@ https://github.com/Apatel468/TokenMaxx
 - [docs/demo_script.md](docs/demo_script.md) — demo walkthrough
 - [docs/roadmap.md](docs/roadmap.md) — milestones
 - [docs/decisions.md](docs/decisions.md) — architectural decisions
+- [docs/deploy-render.md](docs/deploy-render.md) — Render backend deployment
+- [docs/deploy-vercel.md](docs/deploy-vercel.md) — Vercel frontend deployment

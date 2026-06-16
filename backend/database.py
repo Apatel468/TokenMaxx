@@ -6,10 +6,13 @@ Three tables work together:
   messages       — user prompt + assistant response linked to a conversation
   model_runs     — routing decision, tokens, cost, and latency for each reply
 
-SQLite stores everything in smartllm_router.db — no extra setup needed.
+Database URL is read from DATABASE_URL (Render/production) or defaults to a local
+SQLite file for development.
 """
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import (
     Boolean,
@@ -26,7 +29,28 @@ from sqlalchemy import (
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
-DATABASE_URL = "sqlite:///./smartllm_router.db"
+DEFAULT_DATABASE_URL = "sqlite:///./smartllm_router.db"
+
+
+def get_database_url() -> str:
+    """Resolve DB URL from environment (Render sets DATABASE_URL)."""
+    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL).strip() or DEFAULT_DATABASE_URL
+
+
+def _ensure_sqlite_parent_exists(url: str) -> None:
+    """Create parent directories for file-based SQLite paths when needed."""
+    if not url.startswith("sqlite:///"):
+        return
+    raw_path = url.removeprefix("sqlite:///")
+    if raw_path == ":memory:":
+        return
+    db_path = Path(raw_path)
+    if db_path.parent and str(db_path.parent) not in (".", ""):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+DATABASE_URL = get_database_url()
+_ensure_sqlite_parent_exists(DATABASE_URL)
 
 engine = create_engine(
     DATABASE_URL,

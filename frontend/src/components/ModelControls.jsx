@@ -159,7 +159,7 @@ function ModelControls({
         </div>
       ) : models.length === 0 ? (
         <p className="settings-summary">
-          No models found. Restart the backend on port 8001.
+          No models found. Check VITE_API_BASE and restart the backend.
         </p>
       ) : (
         <>

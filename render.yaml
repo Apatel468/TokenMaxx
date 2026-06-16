@@ -1,0 +1,37 @@
+# Render Blueprint — TokenMaxx FastAPI backend
+# Docs: https://render.com/docs/blueprint-spec
+#
+# After deploy, set in the Render dashboard:
+#   GROQ_API_KEY      — Groq API key (optional; mock mode without it)
+#   CORS_ORIGINS      — comma-separated frontend URL(s), e.g. https://tokenmaxx.onrender.com
+#   ADMIN_EMAIL       — optional admin seed email
+#   ADMIN_PASSWORD    — optional admin seed password
+
+services:
+  - type: web
+    name: tokenmaxx-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:////var/data/smartllm_router.db
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: tokenmaxx-data
+      mountPath: /var/data
+      sizeGB: 1
