@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import AnalyticsDashboard from "./components/AnalyticsDashboard.jsx";
 import AdminDashboard from "./components/AdminDashboard.jsx";
 import ChatPage from "./components/ChatPage.jsx";
+import DocumentsPage from "./components/DocumentsPage.jsx";
+import LogsPage from "./components/LogsPage.jsx";
 import Login from "./components/Login.jsx";
 import ModelControls from "./components/ModelControls.jsx";
 import Signup from "./components/Signup.jsx";
@@ -138,6 +140,20 @@ function App() {
           </button>
           <button
             type="button"
+            className={`nav-tabs__btn ${activeTab === "documents" ? "nav-tabs__btn--active" : ""}`}
+            onClick={() => setActiveTab("documents")}
+          >
+            Documents
+          </button>
+          <button
+            type="button"
+            className={`nav-tabs__btn ${activeTab === "logs" ? "nav-tabs__btn--active" : ""}`}
+            onClick={() => setActiveTab("logs")}
+          >
+            Logs
+          </button>
+          <button
+            type="button"
             className={`nav-tabs__btn ${activeTab === "settings" ? "nav-tabs__btn--active" : ""}`}
             onClick={() => setActiveTab("settings")}
           >
@@ -179,6 +195,8 @@ function App() {
         {activeTab === "analytics" && (
           <AnalyticsDashboard onRefresh={analyticsRefresh} />
         )}
+        {activeTab === "documents" && <DocumentsPage />}
+        {activeTab === "logs" && <LogsPage isAdmin={isAdmin} />}
         {activeTab === "settings" && (
           <ModelControls
             isAdmin={isAdmin}

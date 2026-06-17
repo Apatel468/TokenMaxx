@@ -1,9 +1,9 @@
 # TokenMaxx — Demo Script
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.4.0
+> **Version:** 0.5.0
 
-Use this script to demo TokenMaxx to stakeholders in 18–22 minutes.
+Use this script to demo TokenMaxx to stakeholders in 22–28 minutes.
 
 ---
 
@@ -13,12 +13,13 @@ Use this script to demo TokenMaxx to stakeholders in 18–22 minutes.
 2. Start frontend: `cd frontend && npm run dev`
 3. Open http://localhost:5173
 4. Set `GROQ_API_KEY` and `JWT_SECRET` in `backend/.env`
+5. (Optional) Upload a sample `.md` or `.txt` file in **Documents** for RAG demo
 
 ---
 
 ## Act 1 — Intro & Login (1 minute)
 
-> "TokenMaxx classifies each prompt, intelligently enhances it, routes to the best allowed Groq model, streams the answer live, and tracks savings vs. premium."
+> "TokenMaxx classifies each prompt, intelligently enhances it, retrieves context from your documents, routes to the best allowed Groq model, streams the answer live, and tracks savings vs. premium."
 
 1. Sign up or log in
 2. Session persists across refresh (JWT)
@@ -58,7 +59,17 @@ Highlight **Latest Routing** (updates when routing completes, before tokens fini
 
 ---
 
-## Act 5 — Model Regenerate (2 minutes)
+## Act 5 — RAG Documents (3 minutes)
+
+1. Open **Documents** tab
+2. Upload a company FAQ or product spec (TXT/MD/PDF)
+3. Return to **Chat** and ask a question answerable only from that file
+4. Point out the **RAG badge** showing source filenames
+5. Explain: chunks retrieved from ChromaDB, injected into system prompt before routing
+
+---
+
+## Act 6 — Model Regenerate (2 minutes)
 
 1. Click a different top-5 model chip
 2. Show **User switched model to "…"** banner
@@ -66,15 +77,24 @@ Highlight **Latest Routing** (updates when routing completes, before tokens fini
 
 ---
 
-## Act 6 — Model Controls (2 minutes)
+## Act 7 — Model Controls & API Keys (2 minutes)
 
 - Six allowlisted models + **Prompt Enhancement** toggle
 - Admin org-wide disable → chip shows disabled reason
 - User personal toggles
+- **API Keys:** add personal Groq key; explain user key overrides app key for chat
 
 ---
 
-## Act 7 — Analytics & Export (2 minutes)
+## Act 8 — Activity Logs (1 minute)
+
+1. Open **Logs** tab
+2. Show recent events: chat routing, RAG retrieval, model calls
+3. Note: admins can see all users' logs
+
+---
+
+## Act 9 — Analytics & Export (2 minutes)
 
 - KPIs: Total Chats, Actual/Premium Cost, Savings %
 - Model usage breakdown
@@ -82,17 +102,18 @@ Highlight **Latest Routing** (updates when routing completes, before tokens fini
 
 ---
 
-## Act 8 — API (optional, 1 minute)
+## Act 10 — API (optional, 1 minute)
 
 http://127.0.0.1:8001/docs
 
-- `POST /chat/stream` — SSE events
+- `POST /chat/stream` — SSE events (includes RAG metadata)
 - `POST /chat` — sync (tests)
-- `POST /chat/regenerate`
-- Response includes `prompt_analysis`
+- `POST /documents/upload` — RAG ingestion
+- `GET /logs/my` — activity logs
+- `POST /user/api-keys` — encrypted key storage
 
 ---
 
 ## Closing
 
-> "TokenMaxx classifies every request, enhances prompts with task-aware intelligence, streams responses live, routes six curated Groq models with transparent scoring, respects admin and user preferences, regenerates on demand, exports analytics for stakeholders, and proves savings on every request."
+> "TokenMaxx classifies every request, enhances prompts with task-aware intelligence, grounds answers in your uploaded documents, streams responses live, routes six curated Groq models with transparent scoring, supports per-user API keys, logs every pipeline step, respects admin and user preferences, regenerates on demand, exports analytics for stakeholders, and proves savings on every request."

@@ -19,6 +19,11 @@ from services.timezone_utils import format_timestamp_eastern
 from services.router_engine import RoutingDecision
 from services.prompt_enhancer import format_enhanced_prompt_for_display
 from services.prompt_intelligence import PromptAnalysis
+from services.rag_service import (
+    deserialize_source_filenames,
+    serialize_source_documents,
+    serialize_source_filenames,
+)
 
 ROUTER_LABEL = "Router Selected"
 REGENERATE_LABEL = "User Selected Model"
@@ -88,6 +93,22 @@ def _prompt_analysis_for_assistant(
         enhancement_strategy=run.enhancement_strategy or "",
         enhanced_prompt=enhanced,
     )
+
+
+def _rag_for_assistant(db: Session, message: Message) -> tuple[bool, list[str]]:
+    """Return (rag_used, source_filenames) for an assistant turn."""
+    if message.role != "assistant":
+        return False, []
+
+    run = (
+        db.query(ModelRun)
+        .filter(ModelRun.assistant_message_id == message.id)
+        .first()
+    )
+    if not run or not run.rag_used:
+        return False, []
+
+    return True, deserialize_source_filenames(run.rag_source_filenames)
 
 
 def _prompt_enhancement_for_assistant(
@@ -265,6 +286,10 @@ def save_chat_turn(
     classification_reason: str = "",
     classification_confidence: float = 0.0,
     prompt_analysis: PromptAnalysis | None = None,
+    rag_used: bool = False,
+    rag_chunk_count: int = 0,
+    rag_source_documents: list[int] | None = None,
+    rag_source_filenames: list[str] | None = None,
 ) -> tuple[int, str | None, int, int]:
     """Save one user message + assistant reply (+ model_run). Returns ids."""
     if conversation_id:
@@ -335,6 +360,10 @@ def save_chat_turn(
         enhancement_strategy=(
             prompt_analysis.enhancement_strategy if prompt_analysis else None
         ),
+        rag_used=rag_used,
+        rag_chunk_count=rag_chunk_count or None,
+        rag_source_documents=serialize_source_documents(rag_source_documents or []),
+        rag_source_filenames=serialize_source_filenames(rag_source_filenames or []),
     )
     db.add(model_run)
 
@@ -406,6 +435,7 @@ def get_conversation_detail(
             _prompt_enhancement_for_assistant(db, m)
         )
         prompt_analysis = _prompt_analysis_for_assistant(db, m)
+        rag_used, source_filenames = _rag_for_assistant(db, m)
         message_rows.append(
             MessageOut(
                 id=m.id,
@@ -417,6 +447,8 @@ def get_conversation_detail(
                 enhanced_prompt=enhanced_prompt,
                 enhancement_method=enhancement_method,
                 prompt_analysis=prompt_analysis,
+                rag_used=rag_used,
+                source_filenames=source_filenames,
                 created_at=format_timestamp_eastern(m.created_at),
             )
         )

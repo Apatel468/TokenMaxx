@@ -240,6 +240,22 @@ class ChatResponse(BaseModel):
         default=None,
         description="Prompt Intelligence Engine v2 analysis and enhancement metadata.",
     )
+    rag_used: bool = Field(
+        default=False,
+        description="True when uploaded document chunks were injected into context.",
+    )
+    retrieved_chunk_count: int = Field(
+        default=0,
+        description="Number of document chunks retrieved for this reply.",
+    )
+    source_documents: list[int] = Field(
+        default_factory=list,
+        description="Uploaded document ids used as RAG context.",
+    )
+    source_filenames: list[str] = Field(
+        default_factory=list,
+        description="Filenames of documents used as RAG context.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +416,14 @@ class MessageOut(BaseModel):
         default=None,
         description="Prompt Intelligence Engine v2 metadata for assistant turns.",
     )
+    rag_used: bool = Field(
+        default=False,
+        description="True when document context was used for this assistant reply.",
+    )
+    source_filenames: list[str] = Field(
+        default_factory=list,
+        description="Uploaded document filenames used as RAG context.",
+    )
     created_at: str = Field(
         description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
     )
@@ -432,3 +456,92 @@ class ConversationDetail(BaseModel):
     updated_at: str = Field(
         description="Last activity in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
     )
+
+
+# ---------------------------------------------------------------------------
+# Document RAG models (Phase 1)
+# ---------------------------------------------------------------------------
+
+class DocumentOut(BaseModel):
+    """One uploaded document metadata row."""
+
+    id: int
+    filename: str
+    file_type: str
+    chunk_count: int
+    created_at: str
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response after POST /documents/upload."""
+
+    document: DocumentOut
+
+
+class DocumentSearchRequest(BaseModel):
+    """POST /documents/search body."""
+
+    query: str = Field(min_length=1)
+
+
+class DocumentSearchResult(BaseModel):
+    """One semantic search hit from ChromaDB."""
+
+    text: str
+    filename: str
+    chunk_index: int
+    document_id: int
+    similarity_score: float
+
+
+# ---------------------------------------------------------------------------
+# User API keys
+# ---------------------------------------------------------------------------
+
+class UserApiKeyOut(BaseModel):
+    """Masked API key row — never includes full key."""
+
+    id: int
+    provider: str
+    key_label: str
+    masked_key: str
+    is_active: bool
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+
+
+class UserApiKeyCreate(BaseModel):
+    provider: str = Field(min_length=1)
+    api_key: str = Field(min_length=8)
+    key_label: str = ""
+    is_active: bool = True
+
+
+class UserApiKeyUpdate(BaseModel):
+    api_key: str | None = Field(default=None, min_length=8)
+    key_label: str | None = None
+    is_active: bool | None = None
+
+
+class ApiKeyTestResult(BaseModel):
+    valid: bool
+    provider: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Activity logs
+# ---------------------------------------------------------------------------
+
+class ActivityLogOut(BaseModel):
+    id: int
+    user_id: int
+    conversation_id: int | None = None
+    message_id: int | None = None
+    level: str
+    event_type: str
+    message: str
+    metadata: dict = Field(default_factory=dict)
+    created_at: str
+    user_email: str | None = None

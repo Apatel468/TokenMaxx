@@ -37,15 +37,18 @@ from routers import (
     auth,
     chat,
     conversations,
+    documents,
+    logs,
     model_settings_route,
     models,
     settings,
+    user_api_keys,
     user_preferences,
 )
 from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
-API_VERSION = "0.4.0"
+API_VERSION = "0.5.0"
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
@@ -111,6 +114,9 @@ app.include_router(admin.router)
 app.include_router(model_settings_route.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
+app.include_router(documents.router)
+app.include_router(user_api_keys.router)
+app.include_router(logs.router)
 app.include_router(models.router)
 app.include_router(analytics.router)
 app.include_router(settings.router)

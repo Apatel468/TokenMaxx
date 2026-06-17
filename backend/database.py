@@ -88,6 +88,9 @@ class User(Base):
     preferences = relationship(
         "UserPreference", back_populates="user", uselist=False
     )
+    uploaded_documents = relationship("UploadedDocument", back_populates="owner")
+    api_keys = relationship("UserApiKey", back_populates="owner")
+    activity_logs = relationship("ActivityLog", back_populates="owner")
 
 
 class UserPreference(Base):
@@ -279,6 +282,12 @@ class ModelRun(Base):
     prompt_enhancement_task_type = Column(String(40), nullable=True)
     enhancement_strategy = Column(String(60), nullable=True)
 
+    # Phase 2 RAG metadata
+    rag_used = Column(Boolean, nullable=False, default=False)
+    rag_chunk_count = Column(Integer, nullable=True)
+    rag_source_documents = Column(Text, nullable=True)
+    rag_source_filenames = Column(Text, nullable=True)
+
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -291,6 +300,80 @@ class ModelRun(Base):
 # ---------------------------------------------------------------------------
 # Legacy table — kept so old data is not lost; new code uses tables above
 # ---------------------------------------------------------------------------
+class UploadedDocument(Base):
+    """
+    Metadata for a user-uploaded document (TXT, MD, PDF).
+
+    Chunk text and embeddings live in ChromaDB; this table tracks ownership
+    and listing metadata only.
+    """
+
+    __tablename__ = "uploaded_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    file_type = Column(String(10), nullable=False)
+    chunk_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    owner = relationship("User", back_populates="uploaded_documents")
+
+
+class UserApiKey(Base):
+    """Encrypted per-user LLM provider API keys."""
+
+    __tablename__ = "user_api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String(30), nullable=False, index=True)
+    encrypted_api_key = Column(Text, nullable=False)
+    key_label = Column(String(100), nullable=False, default="")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    last_used_at = Column(DateTime, nullable=True)
+
+    owner = relationship("User", back_populates="api_keys")
+
+
+class ActivityLog(Base):
+    """Timestamped backend activity for debugging and audit."""
+
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=True, index=True)
+    level = Column(String(20), nullable=False, default="info", index=True)
+    event_type = Column(String(60), nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    owner = relationship("User", back_populates="activity_logs")
+
+
 class ChatHistory(Base):
     __tablename__ = "chat_history"
 
@@ -321,6 +404,8 @@ def init_db() -> None:
     _migrate_regeneration_columns()
     _migrate_classification_columns()
     _migrate_prompt_intelligence_columns()
+    _migrate_rag_columns()
+    _migrate_api_keys_and_logs_tables()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -488,6 +573,46 @@ def _migrate_prompt_intelligence_columns() -> None:
         ("prompt_output_format", "VARCHAR(200)"),
         ("prompt_enhancement_task_type", "VARCHAR(40)"),
         ("enhancement_strategy", "VARCHAR(60)"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_api_keys_and_logs_tables() -> None:
+    """Create user_api_keys and activity_logs tables if missing."""
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+        if "user_api_keys" not in tables:
+            Base.metadata.tables["user_api_keys"].create(bind=conn, checkfirst=True)
+            conn.commit()
+        if "activity_logs" not in tables:
+            Base.metadata.tables["activity_logs"].create(bind=conn, checkfirst=True)
+            conn.commit()
+
+
+def _migrate_rag_columns() -> None:
+    """Add RAG metadata columns to model_runs."""
+    new_columns = (
+        ("rag_used", "BOOLEAN DEFAULT 0"),
+        ("rag_chunk_count", "INTEGER"),
+        ("rag_source_documents", "TEXT"),
+        ("rag_source_filenames", "TEXT"),
     )
     with engine.connect() as conn:
         for column_name, column_type in new_columns:

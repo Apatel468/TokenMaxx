@@ -77,7 +77,7 @@ CORS_ORIGINS=https://your-app.vercel.app,https://your-app-*.vercel.app
 
 ## Routing (no React Router)
 
-TokenMaxx uses **tab state** in `App.jsx` (Chat, Analytics, Model Controls, Admin) — not React Router and not URL paths.
+TokenMaxx uses **tab state** in `App.jsx` (Chat, Analytics, Documents, Logs, Model Controls, Admin) — not React Router and not URL paths.
 
 `frontend/vercel.json` includes an SPA rewrite so direct visits to any path still serve `index.html`. This future-proofs the app if URL routing is added later.
 
@@ -98,6 +98,7 @@ Used by:
 - `http.js` → `authFetch` (most endpoints)
 - `auth.js` → signup/login
 - `chat.js` → SSE streaming
+- `documents.js` → RAG file upload/list/delete
 
 Default when unset: `http://127.0.0.1:8001` (local dev only).
 
@@ -115,7 +116,9 @@ npm run preview   # optional: test production build locally
 1. Open the preview URL → login/signup works.
 2. Browser DevTools → Network → API calls hit `VITE_API_BASE`, not localhost.
 3. Send a chat message → streaming response appears.
-4. Analytics tab loads data.
+4. Documents tab → upload a file.
+5. Logs tab → recent activity events load.
+6. Analytics tab loads data.
 
 ---
 

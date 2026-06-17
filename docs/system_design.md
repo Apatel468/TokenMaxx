@@ -1,82 +1,131 @@
 # TokenMaxx — System Design
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.4.0 · **Last updated:** June 2026
+> **Version:** 0.5.0 · **Last updated:** June 2026
 
 ---
 
-## Overview
+## Problem
 
-TokenMaxx is a two-tier web application that optimizes LLM spend by classifying prompts, analyzing and enhancing them with Prompt Intelligence v2, scoring allowlisted Groq models per task, streaming responses over SSE, respecting org-wide and per-user toggles, supporting on-demand regeneration, exporting analytics, and reporting savings vs. a GPT-4o baseline.
-
----
-
-## Components
-
-| Layer | Technology | Responsibility |
-|-------|------------|----------------|
-| Frontend | React + Vite | Auth, SSE chat, routing UI, prompt optimization viewer, analytics export |
-| API | FastAPI | `/auth`, `/chat`, `/chat/stream`, `/chat/regenerate`, `/analytics/*` |
-| Services | Python | Classify, Prompt Intelligence v2, route, stream/sync generate, persist |
-| Data | SQLite | Users, preferences, conversations, model runs, settings |
-| External | Groq via LiteLLM | Inference + streaming on allowlisted models |
+Teams want LLM quality without always paying premium-model prices. TokenMaxx automatically picks the cheapest Groq model that fits each task, enhances prompts intelligently, grounds answers in uploaded documents, and proves savings with transparent routing metadata.
 
 ---
 
-## Request Flow (new chat — streaming, default UI)
+## Core Flows
 
-```
-Login → JWT stored
-POST /chat/stream { prompt, enhance_prompt? }
-  → LLM classify (keyword fallback)
-  → Prompt Intelligence v2 (if enhancement ON)
-  → route to best available model
-  → SSE: routing_complete (metadata for Latest Routing)
-  → stream tokens live
-  → persist after complete → SSE: complete (full ChatResponse + prompt_analysis)
-```
+### 1. Chat (streaming)
 
-## Request Flow (regenerate)
+1. User sends message in Chat tab
+2. Frontend calls `POST /chat/stream` (SSE)
+3. Backend: classify → enhance → **RAG retrieve** → route → stream tokens
+4. UI shows routing panel, then token-by-token reply; RAG badge if documents used
+5. Assistant message persisted after stream completes
 
-```
-POST /chat/regenerate { conversation_id, message_id, model_id }
-  → reuse stored prompts (no classify/enhance/route)
-  → single non-streaming generate call
-```
+### 2. Document upload (RAG)
 
-## Analytics Export Flow
+1. User uploads TXT/MD/PDF in Documents tab
+2. Backend chunks, embeds, stores in ChromaDB; metadata in SQLite
+3. On next chat turn, relevant chunks injected into system prompt
 
-```
-Analytics tab → existing API data in memory
-Export Report → tokenmaxx-analytics-report.csv (client-side, no new endpoint)
-```
+### 3. Model regenerate
 
----
+1. User clicks alternate model chip on assistant message
+2. `POST /chat/regenerate` — one sync LLM call with stored enhanced prompt
+3. Non-streaming; reuses routing context from original turn
 
-## Configuration
+### 4. API keys
 
-| Source | Contents |
-|--------|----------|
-| `model_registry.py` | `GROQ_MODEL_ALLOWLIST`, metadata, pricing |
-| `models.yaml` | Task profiles, auxiliary models, premium baseline |
-| `model_scorer.py` | `TASK_MODEL_BONUSES`, routing complexity weights |
-| `prompt_intelligence.py` | Personas, enhancement strategies, complexity scoring |
-| SQLite | Model toggles, `enhance_prompts` |
+1. User adds Groq key in Model Controls → encrypted in DB
+2. Chat/regenerate use user key first; fall back to app `GROQ_API_KEY`
+3. Test endpoint validates key against provider
+
+### 5. Activity logs
+
+1. Pipeline events written to `activity_logs` on each significant action
+2. Users see own logs; admins see all via Logs tab
 
 ---
 
-## Security Notes
+## Routing Design
 
-- JWT on all protected routes; admin role for `/admin/*`
-- Model availability: `admin_enabled AND user_enabled`
-- Secrets in `.env` only — never commit
-- CORS: localhost 5173/5174
+| Input | Source |
+|-------|--------|
+| Task type | `llm_classifier` or keyword fallback |
+| Complexity | `prompt_intelligence` (0–100 score) |
+| Model scores | `model_registry` editorial + `model_scorer` bonuses |
+| Filters | Admin disable, user disable, Groq allowlist |
+
+Output: selected model + top-5 candidates with scores and savings %.
 
 ---
 
-## Related Docs
+## Prompt Intelligence v2
 
-- [architecture.md](architecture.md) — detailed technical reference
-- [project_memory.md](project_memory.md) — full project context
-- [decisions.md](decisions.md) — design decisions
-- [demo_script.md](demo_script.md) — stakeholder demo walkthrough
+| Field | Description |
+|-------|-------------|
+| `task_type` | coding, business, creative, etc. |
+| `complexity_score` | 0–100 |
+| `complexity_level` | simple / medium / complex |
+| `persona` | Expert role for the model |
+| `enhancement_strategy` | minimal / structured / full |
+| `enhanced_prompt` | Clean text sent to LLM (no bracket notes) |
+
+Toggle: `enhance_prompts` in user preferences.
+
+---
+
+## RAG Design
+
+| Setting | Default |
+|---------|---------|
+| Top-K chunks | 3 |
+| Similarity threshold | 0.4 (`RAG_SIMILARITY_THRESHOLD`) |
+| Embedding model | `all-MiniLM-L6-v2` |
+| Scope | Per-user document collection |
+
+Response fields: `rag_used`, `retrieved_chunk_count`, `source_documents`, `source_filenames`.
+
+---
+
+## Cost Model
+
+- **Actual cost:** LiteLLM token usage × Groq model price
+- **Premium baseline:** Same tokens × GPT-4o price
+- **Savings %:** `(premium - actual) / premium × 100`
+
+Stored per `model_run` and aggregated in Analytics.
+
+---
+
+## Security
+
+| Concern | Approach |
+|---------|----------|
+| Auth | JWT (HS256), bcrypt passwords |
+| User API keys | Fernet encryption (`API_KEY_ENCRYPTION_SECRET`) |
+| Activity logs | Metadata only; keys never logged |
+| CORS | `CORS_ORIGINS` whitelist in production |
+| Admin | Role-based access on admin routes and logs |
+
+---
+
+## Scalability Notes (MVP)
+
+- SQLite + local ChromaDB suit single-instance deploy
+- For multi-instance: migrate to Postgres + hosted vector DB
+- SSE requires sticky sessions or stateless stream design for horizontal scale
+
+---
+
+## Test Coverage
+
+59 pytest tests:
+
+- Auth, conversations, health
+- Chat sync + stream
+- Routing, classifier, prompt intelligence
+- Documents + RAG in chat
+- API keys + activity logs
+- Model settings
+
+LLM calls mocked in CI via `ALLOW_MOCK_LLM` and test fixtures.

@@ -25,7 +25,9 @@ Render sets `$PORT` automatically — do not hardcode `8001` in production.
 4. Set secret env vars when prompted:
    - `GROQ_API_KEY`
    - `CORS_ORIGINS` (your deployed frontend URL)
+   - `API_KEY_ENCRYPTION_SECRET` (recommended for user API keys)
    - Optional: `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+   - Optional: `CHROMA_PERSIST_DIR=/var/data/chroma` (with persistent disk)
 5. Deploy.
 
 The blueprint provisions:
@@ -61,13 +63,19 @@ The blueprint provisions:
 | `JWT_EXPIRE_HOURS` | No | Default `168` |
 | `ADMIN_EMAIL` | No | Seeds admin on startup |
 | `ADMIN_PASSWORD` | No | Seeds admin on startup |
+| `API_KEY_ENCRYPTION_SECRET` | Recommended | Encrypts user API keys at rest |
+| `CHROMA_PERSIST_DIR` | No | RAG vector store path (use `/var/data/chroma` with disk) |
+| `RAG_SIMILARITY_THRESHOLD` | No | Default `0.4` |
+| `ALLOW_MOCK_LLM` | No | Default `true`; set `false` in production |
 
 4. **Persistent disk** (recommended):
    - Mount path: `/var/data`
    - Size: 1 GB
    - Set `DATABASE_URL` = `sqlite:////var/data/smartllm_router.db`
 
-   Without a disk, SQLite lives on ephemeral storage and **resets on redeploy**.
+   Without a disk, SQLite and ChromaDB live on ephemeral storage and **reset on redeploy**.
+
+   For RAG persistence, also set `CHROMA_PERSIST_DIR=/var/data/chroma`.
 
 ---
 
@@ -77,12 +85,16 @@ All secrets are read from `os.environ` (set in Render dashboard or `render.yaml`
 
 | Variable | Used by |
 |----------|---------|
-| `GROQ_API_KEY` | LLM calls via LiteLLM |
+| `GROQ_API_KEY` | LLM calls via LiteLLM (fallback when user has no key) |
 | `JWT_SECRET` | `auth_service.py` |
 | `JWT_EXPIRE_HOURS` | Token lifetime |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Admin seed on startup |
 | `DATABASE_URL` | `database.py` |
 | `CORS_ORIGINS` | `main.py` CORS middleware |
+| `CHROMA_PERSIST_DIR` | `vector_store.py` — RAG embeddings |
+| `RAG_SIMILARITY_THRESHOLD` | `rag_service.py` |
+| `API_KEY_ENCRYPTION_SECRET` | `key_encryption.py` |
+| `ALLOW_MOCK_LLM` | `model_clients.py` — mock when no key |
 
 ---
 
@@ -98,7 +110,7 @@ Example response:
 {
   "status": "ok",
   "service": "TokenMaxx",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "database": { "status": "ok" },
   "groq_configured": true
 }
@@ -151,6 +163,6 @@ pytest -v
 |-------|-----|
 | CORS errors in browser | Set `CORS_ORIGINS` to exact frontend URL (no trailing slash) |
 | 401 on all routes | Sign up/login again; ensure `JWT_SECRET` is stable across deploys |
-| Data lost after redeploy | Attach persistent disk + `DATABASE_URL=sqlite:////var/data/smartllm_router.db` |
+| Data lost after redeploy | Attach persistent disk + `DATABASE_URL=sqlite:////var/data/smartllm_router.db` + `CHROMA_PERSIST_DIR=/var/data/chroma` |
 | Cold start slow (free tier) | First request after idle may take 30–60s |
 | Build fails | Confirm **Root Directory** is `backend` |

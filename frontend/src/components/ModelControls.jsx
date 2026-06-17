@@ -9,6 +9,7 @@ import {
   normalizeModelRow,
   saveModelControls,
 } from "../api/settings.js";
+import ApiKeysSection from "./ApiKeysSection.jsx";
 
 function tierLabel(tier) {
   if (tier === "economy") return "Economy";
@@ -238,6 +239,8 @@ function ModelControls({
           </div>
         </>
       )}
+
+      <ApiKeysSection />
     </div>
   );
 }

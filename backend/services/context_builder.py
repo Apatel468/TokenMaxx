@@ -35,6 +35,11 @@ class PromptContext:
     prompt_analysis: PromptAnalysis | None = None
     # Full chat history for LiteLLM: prior messages + enhanced latest user turn
     message_history: list[dict] = field(default_factory=list)
+    # Phase 2 RAG — document retrieval metadata (injected into system_prompt)
+    rag_used: bool = False
+    retrieved_chunk_count: int = 0
+    source_documents: list[int] = field(default_factory=list)
+    source_filenames: list[str] = field(default_factory=list)
 
 
 _CHARS_PER_TOKEN = 4

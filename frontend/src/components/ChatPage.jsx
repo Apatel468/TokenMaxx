@@ -43,6 +43,23 @@ function applyRegenerateToRoutingResult(previousResult, regenData) {
   };
 }
 
+function RagContextMeta({ ragUsed = false, filenames = [] }) {
+  if (!ragUsed) return null;
+
+  const safeFilenames = Array.isArray(filenames) ? filenames : [];
+
+  return (
+    <div className="rag-context-meta">
+      <span className="rag-context-badge">Document Context Used</span>
+      {safeFilenames.length > 0 && (
+        <span className="rag-context-sources">
+          Sources: {safeFilenames.join(", ")}
+        </span>
+      )}
+    </div>
+  );
+}
+
 
 
 function ChatPage({ onChatComplete, enhancePrompts = true }) {
@@ -407,6 +424,16 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                 msg.selected_model;
 
               const isStreaming = msg.id === streamingMessageId || msg.streaming;
+              const isActiveStream = msg.id === streamingMessageId;
+              const ragUsed =
+                Boolean(msg.rag_used) ||
+                (isActiveStream && Boolean(result?.rag_used));
+              const ragFilenames =
+                Array.isArray(msg.source_filenames) && msg.source_filenames.length > 0
+                  ? msg.source_filenames
+                  : isActiveStream && Array.isArray(result?.source_filenames)
+                    ? result.source_filenames
+                    : [];
 
               return (
 
@@ -429,6 +456,7 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                       User switched model to &ldquo;{msg.selected_model}&rdquo;
                     </p>
                     <p className="thread-msg__text">{msg.content}</p>
+                    <RagContextMeta ragUsed={ragUsed} filenames={ragFilenames} />
                     <PromptEnhancementViewer
                       originalPrompt={msg.original_prompt}
                       enhancedPrompt={msg.enhanced_prompt}
@@ -449,6 +477,9 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                         <span className="thread-msg__cursor" aria-hidden="true" />
                       )}
                     </p>
+                    {!isStreaming && (
+                      <RagContextMeta ragUsed={ragUsed} filenames={ragFilenames} />
+                    )}
                     {!isStreaming && (
                       <PromptEnhancementViewer
                         originalPrompt={msg.original_prompt}
@@ -562,6 +593,17 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     <div className="routing-user-selected-badge" role="status">
                       User Selected
                     </div>
+                  )}
+
+                  {result.rag_used && (
+                    <RagContextMeta
+                      ragUsed={Boolean(result.rag_used)}
+                      filenames={
+                        Array.isArray(result.source_filenames)
+                          ? result.source_filenames
+                          : []
+                      }
+                    />
                   )}
 
                   <div className="result__grid">

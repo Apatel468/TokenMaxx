@@ -1,7 +1,7 @@
 # TokenMaxx — Architectural Decisions
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.4.0 · **Last updated:** June 2026  
+> **Version:** 0.5.0 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
 
 ---
@@ -12,12 +12,13 @@
 |--------|----------|-----------|
 | Backend | FastAPI | OpenAPI, Pydantic, `StreamingResponse` for SSE |
 | Database | SQLite | Zero setup for MVP |
+| Vector store | ChromaDB + sentence-transformers | Local persistence; no external vector DB for MVP |
 | Auth | bcrypt + PyJWT (HS256) | Simple stateless tokens |
 | LLM gateway | LiteLLM | Unified Groq interface + `stream=True` |
 | Streaming | Server-Sent Events | `POST /chat/stream`; frontend uses fetch + ReadableStream |
 | Provider | Groq only (allowlisted) | Cost/speed; controlled catalog |
 | Frontend | React + Vite | Fast iteration |
-| Tests | pytest + httpx | 39 tests; mocked LLM/stream in CI |
+| Tests | pytest + httpx | 59 tests; mocked LLM/stream in CI |
 
 ---
 
@@ -40,6 +41,26 @@
 **Complexity tiers:** simple → minimal; medium → structured; complex → full specification.  
 **Clean prompts:** No `[Original user request — preserve this intent: ...]` in stored or displayed text.  
 **Why:** Task- and complexity-aware enhancement; transparent metadata for demos.
+
+### RAG with ChromaDB (v0.5.0) 🔒
+**Decision:** Per-user document collections in ChromaDB; metadata in SQLite `uploaded_documents`.  
+**Pipeline:** After `build_context()` and before `route()` in `chat_service.prepare_chat_turn()`.  
+**Retrieval:** Top 3 chunks; cosine similarity threshold 0.4 (`RAG_SIMILARITY_THRESHOLD`).  
+**Injection:** Retrieved text prepended to system prompt via `rag_service.py`.  
+**Formats:** TXT, MD, PDF.  
+**Why:** Ground answers in user uploads without external vector DB cost.
+
+### User API keys (v0.5.0) 🔒
+**Decision:** Users can store per-provider keys encrypted with Fernet (`API_KEY_ENCRYPTION_SECRET`).  
+**Resolution order (chat + regenerate):** user key → app `GROQ_API_KEY` → mock if `ALLOW_MOCK_LLM=true`.  
+**Not used for:** classifier, enhancer, title, Groq model sync (app `.env` only).  
+**Why:** BYOK for power users; app key as fallback for demos.
+
+### Activity logs (v0.5.0)
+**Decision:** Structured events in `activity_logs`; metadata sanitized (no raw keys).  
+**Scope:** Chat pipeline, RAG, routing, model calls, login, document upload, API key CRUD.  
+**Access:** Users see own logs; admins see all via `GET /logs/admin/logs`.  
+**Why:** Debuggability and demo transparency without log aggregation infra.
 
 ### LLM task classifier (v0.3.3) 🔒
 **Decision:** `llm_classifier.py` + keyword fallback in `prompt_analyzer.py`.  
@@ -67,13 +88,14 @@ User `messages.content` = original text; `model_runs.enhanced_prompt` = clean en
 
 ## Groq Touchpoints (with API key)
 
-| Step | When | Model |
-|------|------|-------|
-| Classify | Each chat turn | `llm_classifier` → llama-3.1-8b-instant |
-| Analyze + enhance | Each turn (if enabled) | Prompt Intelligence v2 → llama-3.1-8b-instant |
-| Route + respond | Each chat turn | Scored allowlisted model (stream or sync) |
-| Title | First turn | `auxiliary.title` |
-| Regenerate | User click only | User-selected model (sync) |
+| Step | When | Model | Key source |
+|------|------|-------|------------|
+| Classify | Each chat turn | `llm_classifier` → llama-3.1-8b-instant | App `.env` |
+| Analyze + enhance | Each turn (if enabled) | Prompt Intelligence v2 | App `.env` |
+| RAG embed/search | Upload + each chat turn | sentence-transformers + ChromaDB | N/A |
+| Route + respond | Each chat turn | Scored allowlisted model (stream or sync) | User key → env → mock |
+| Title | First turn | `auxiliary.title` | App `.env` |
+| Regenerate | User click only | User-selected model (sync) | User key → env → mock |
 
 ---
 

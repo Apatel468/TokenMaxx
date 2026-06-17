@@ -14,7 +14,8 @@ from services.context_builder import PromptContext
 from services.conversation_store import get_conversation_or_404
 from services.cost_tracker import estimate_costs, log_request_metrics
 from services.groq_models import get_model_record, get_routable_models
-from services.model_clients import generate_response
+from services.activity_log_service import record_activity
+from services.model_clients import MissingApiKeyError, generate_response
 from services.model_settings import get_model_disabled_reason
 
 REGENERATE_LABEL = "User Selected Model"
@@ -120,11 +121,38 @@ def regenerate_with_model(
         db, conversation_id, message_id
     )
 
-    model_response = generate_response(
-        model_id,
-        context,
-        messages=context.message_history,
+    record_activity(
+        db,
+        user_id=user.id,
+        event_type="regenerate_started",
+        message="Regeneration started.",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        metadata={"model": model_id},
     )
+
+    try:
+        model_response = generate_response(
+            model_id,
+            context,
+            messages=context.message_history,
+            db=db,
+            user_id=user.id,
+        )
+    except MissingApiKeyError as exc:
+        record_activity(
+            db,
+            user_id=user.id,
+            level="error",
+            event_type="model_call_failed",
+            message=str(exc),
+            conversation_id=conversation_id,
+            message_id=message_id,
+            metadata={"model": model_id, "provider": exc.provider},
+        )
+        db.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     costs = estimate_costs(model_id, context, model_response)
     log_request_metrics(model_id, context.task_type, model_response, costs)
 
@@ -165,6 +193,20 @@ def regenerate_with_model(
         turn_user_message_id=message_id,
     )
     db.add(model_run)
+    record_activity(
+        db,
+        user_id=user.id,
+        event_type="regenerate_completed",
+        message="Regeneration completed.",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        metadata={
+            "model": model_id,
+            "latency_ms": model_response.latency_ms,
+            "input_tokens": costs.input_tokens,
+            "output_tokens": costs.output_tokens,
+        },
+    )
     db.commit()
     db.refresh(assistant_message)
 

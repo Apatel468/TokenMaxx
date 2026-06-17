@@ -35,8 +35,11 @@ from services.chat_service import (
     persist_chat_turn,
     prepare_chat_turn,
 )
+from services.activity_log_service import record_activity
 from services.model_clients import (
+    MissingApiKeyError,
     _has_groq_key,
+    _has_provider_key,
     build_response_from_stream,
     generate_response,
     stream_response,
@@ -73,16 +76,74 @@ def chat(
     6. Save user + assistant messages and routing metrics.
     """
     try:
+        record_activity(
+            db,
+            user_id=current_user.id,
+            event_type="chat_request_received",
+            message="Chat request received.",
+            conversation_id=request.conversation_id,
+            metadata={"enhance_prompt": request.enhance_prompt},
+        )
         analysis, context, decision, enhancement_cost_saved, _prior = prepare_chat_turn(
             db, current_user, request
         )
     except NoModelsEnabledError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    model_response = generate_response(
-        decision.groq_model,
-        context,
-        messages=context.message_history,
+    record_activity(
+        db,
+        user_id=current_user.id,
+        event_type="model_call_started",
+        message="Model call started.",
+        conversation_id=request.conversation_id,
+        metadata={"model": decision.model_id, "provider": "groq", "task_type": context.task_type},
+    )
+    try:
+        model_response = generate_response(
+            decision.groq_model,
+            context,
+            messages=context.message_history,
+            db=db,
+            user_id=current_user.id,
+        )
+    except MissingApiKeyError as exc:
+        record_activity(
+            db,
+            user_id=current_user.id,
+            level="error",
+            event_type="model_call_failed",
+            message=str(exc),
+            conversation_id=request.conversation_id,
+            metadata={"provider": exc.provider},
+        )
+        db.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        record_activity(
+            db,
+            user_id=current_user.id,
+            level="error",
+            event_type="model_call_failed",
+            message="Model call failed.",
+            conversation_id=request.conversation_id,
+            metadata={"model": decision.model_id, "error": str(exc)},
+        )
+        db.commit()
+        raise
+
+    record_activity(
+        db,
+        user_id=current_user.id,
+        event_type="model_call_completed",
+        message="Model call completed.",
+        conversation_id=request.conversation_id,
+        metadata={
+            "model": decision.model_id,
+            "provider": "groq",
+            "latency_ms": model_response.latency_ms,
+            "input_tokens": model_response.input_tokens,
+            "output_tokens": model_response.estimated_output_tokens,
+        },
     )
 
     conversation_id, title, user_message_id, assistant_message_id, costs = persist_chat_turn(
@@ -95,6 +156,7 @@ def chat(
         model_response,
         enhancement_cost_saved,
     )
+    db.commit()
 
     return build_chat_response(
         request,
@@ -128,6 +190,14 @@ def chat_stream(
         yield format_sse("routing_start", {})
 
         try:
+            record_activity(
+                db,
+                user_id=current_user.id,
+                event_type="chat_request_received",
+                message="Chat stream request received.",
+                conversation_id=request.conversation_id,
+                metadata={"enhance_prompt": request.enhance_prompt, "streaming": True},
+            )
             analysis, context, decision, enhancement_cost_saved, _prior = (
                 prepare_chat_turn(db, current_user, request)
             )
@@ -146,16 +216,49 @@ def chat_stream(
 
         accumulated = ""
         start = time.perf_counter()
+        record_activity(
+            db,
+            user_id=current_user.id,
+            event_type="model_call_started",
+            message="Streaming model call started.",
+            conversation_id=request.conversation_id,
+            metadata={"model": decision.model_id, "provider": "groq", "streaming": True},
+        )
         try:
             for chunk in stream_response(
                 decision.groq_model,
                 context,
                 messages=context.message_history,
+                db=db,
+                user_id=current_user.id,
             ):
                 accumulated += chunk
                 yield format_sse("token", {"content": chunk})
+        except MissingApiKeyError as exc:
+            record_activity(
+                db,
+                user_id=current_user.id,
+                level="error",
+                event_type="model_call_failed",
+                message=str(exc),
+                conversation_id=request.conversation_id,
+                metadata={"provider": exc.provider, "streaming": True},
+            )
+            db.commit()
+            yield format_sse("error", {"message": str(exc)})
+            return
         except Exception as exc:
             logger.exception("Chat stream generation failed")
+            record_activity(
+                db,
+                user_id=current_user.id,
+                level="error",
+                event_type="model_call_failed",
+                message="Streaming model call failed.",
+                conversation_id=request.conversation_id,
+                metadata={"model": decision.model_id, "error": str(exc)},
+            )
+            db.commit()
             yield format_sse("error", {"message": str(exc)})
             return
 
@@ -165,7 +268,21 @@ def chat_stream(
             context,
             accumulated,
             latency_ms=latency_ms,
-            is_mock=not _has_groq_key(),
+            is_mock=not _has_provider_key(db, current_user.id, "groq"),
+        )
+
+        record_activity(
+            db,
+            user_id=current_user.id,
+            event_type="model_call_completed",
+            message="Streaming model call completed.",
+            conversation_id=request.conversation_id,
+            metadata={
+                "model": decision.model_id,
+                "provider": "groq",
+                "latency_ms": latency_ms,
+                "streaming": True,
+            },
         )
 
         try:
@@ -195,6 +312,7 @@ def chat_stream(
                 db,
                 current_user,
             )
+            db.commit()
             yield format_sse("complete", json.loads(response.model_dump_json()))
         except Exception as exc:
             logger.exception("Chat stream persistence failed")

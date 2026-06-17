@@ -27,8 +27,20 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Only Groq is used in Phase 2
 GROQ_ENV_KEY = "GROQ_API_KEY"
+DEFAULT_PROVIDER = "groq"
+
+
+class MissingApiKeyError(Exception):
+    """Raised when no user or app-level API key exists for a provider."""
+
+    def __init__(self, provider: str, detail: str | None = None):
+        self.provider = provider
+        self.detail = detail or (
+            f"No API key configured for provider '{provider}'. "
+            "Add a key under API Keys or set the app-level environment variable."
+        )
+        super().__init__(self.detail)
 
 # Extra system instruction for Qwen models that may emit chain-of-thought tags
 _QWEN_MODEL_ID = "qwen/qwen3-32b"
@@ -63,6 +75,22 @@ _MOCK_TEMPLATES: dict[str, str] = {
 }
 
 
+def _allow_mock_fallback() -> bool:
+    """When true, missing keys fall back to mock responses (local demo default)."""
+    return os.getenv("ALLOW_MOCK_LLM", "true").lower() in ("1", "true", "yes")
+
+
+def _provider_for_model(groq_model: str) -> str:
+    """TokenMaxx routing currently uses Groq models."""
+    return DEFAULT_PROVIDER
+
+
+def _resolve_api_key(db, user_id: int | None, provider: str) -> str | None:
+    from services.api_key_service import resolve_api_key
+
+    return resolve_api_key(db, user_id, provider)
+
+
 def _has_groq_key() -> bool:
     """
     Return True if GROQ_API_KEY exists in the environment.
@@ -70,6 +98,10 @@ def _has_groq_key() -> bool:
     We only check presence — never log or expose the key value.
     """
     return bool(os.getenv(GROQ_ENV_KEY, "").strip())
+
+
+def _has_provider_key(db, user_id: int | None, provider: str) -> bool:
+    return bool(_resolve_api_key(db, user_id, provider))
 
 
 def _to_litellm_model(groq_model: str) -> str:
@@ -155,6 +187,8 @@ def _call_groq(
     groq_model: str,
     context: PromptContext,
     messages: list[dict] | None = None,
+    *,
+    api_key: str | None = None,
 ) -> ModelResponse:
     """
     Call Groq through LiteLLM.
@@ -169,7 +203,10 @@ def _call_groq(
     )
 
     start = time.perf_counter()
-    response = litellm.completion(model=litellm_model, messages=litellm_messages)
+    kwargs: dict = {"model": litellm_model, "messages": litellm_messages}
+    if api_key:
+        kwargs["api_key"] = api_key
+    response = litellm.completion(**kwargs)
     latency_ms = (time.perf_counter() - start) * 1000
 
     raw_text = response.choices[0].message.content or ""
@@ -231,6 +268,8 @@ def _call_groq_stream(
     groq_model: str,
     context: PromptContext,
     messages: list[dict] | None = None,
+    *,
+    api_key: str | None = None,
 ) -> Iterator[str]:
     """Stream Groq completion chunks via LiteLLM."""
     import litellm
@@ -240,11 +279,14 @@ def _call_groq_stream(
         context, groq_model, messages=messages
     )
 
-    response = litellm.completion(
-        model=litellm_model,
-        messages=litellm_messages,
-        stream=True,
-    )
+    kwargs: dict = {
+        "model": litellm_model,
+        "messages": litellm_messages,
+        "stream": True,
+    }
+    if api_key:
+        kwargs["api_key"] = api_key
+    response = litellm.completion(**kwargs)
     for chunk in response:
         delta = chunk.choices[0].delta.content
         if delta:
@@ -255,6 +297,9 @@ def stream_response(
     groq_model: str,
     context: PromptContext,
     messages: list[dict] | None = None,
+    *,
+    db=None,
+    user_id: int | None = None,
 ) -> Iterator[str]:
     """
     Yield response text chunks for SSE streaming.
@@ -262,24 +307,37 @@ def stream_response(
     Uses real Groq streaming when available; otherwise fakes word-by-word
     delivery from the mock/fallback full response.
     """
-    if not _has_groq_key():
+    provider = _provider_for_model(groq_model)
+    api_key = _resolve_api_key(db, user_id, provider)
+    if not api_key:
+        if not _allow_mock_fallback():
+            raise MissingApiKeyError(provider)
         logger.info(
-            "Mock stream fallback | groq_model=%s | reason=%s not set",
+            "Mock stream fallback | groq_model=%s | reason=no provider key",
             groq_model,
-            GROQ_ENV_KEY,
         )
         mock = _generate_mock_response(groq_model, context)
         yield from _fake_stream_chunks(mock.text)
         return
 
     try:
-        yield from _call_groq_stream(groq_model, context, messages=messages)
+        yield from _call_groq_stream(
+            groq_model, context, messages=messages, api_key=api_key
+        )
+        if db is not None and user_id is not None:
+            from services.api_key_service import mark_provider_key_used
+
+            mark_provider_key_used(db, user_id, provider)
+    except MissingApiKeyError:
+        raise
     except Exception as exc:
         logger.warning(
             "Groq stream failed | model=%s | error=%s — fake streaming mock",
             groq_model,
             exc,
         )
+        if not _allow_mock_fallback():
+            raise
         mock = _generate_mock_response(groq_model, context)
         yield from _fake_stream_chunks(mock.text)
 
@@ -312,22 +370,34 @@ def generate_response(
     groq_model: str,
     context: PromptContext,
     messages: list[dict] | None = None,
+    *,
+    db=None,
+    user_id: int | None = None,
 ) -> ModelResponse:
     """
     Main entry point — called by POST /chat after the router picks a model.
 
     Pass `messages` for multi-turn chats (full history including new user msg).
     """
-    if not _has_groq_key():
+    provider = _provider_for_model(groq_model)
+    api_key = _resolve_api_key(db, user_id, provider)
+    if not api_key:
+        if not _allow_mock_fallback():
+            raise MissingApiKeyError(provider)
         logger.info(
-            "Mock fallback | groq_model=%s | reason=%s not set",
+            "Mock fallback | groq_model=%s | reason=no provider key",
             groq_model,
-            GROQ_ENV_KEY,
         )
         return _generate_mock_response(groq_model, context)
 
     try:
-        result = _call_groq(groq_model, context, messages=messages)
+        result = _call_groq(
+            groq_model, context, messages=messages, api_key=api_key
+        )
+        if db is not None and user_id is not None:
+            from services.api_key_service import mark_provider_key_used
+
+            mark_provider_key_used(db, user_id, provider)
         logger.info(
             "Groq success | model=%s | input_tokens=%s | output_tokens=%s | "
             "latency_ms=%.1f",
@@ -337,10 +407,14 @@ def generate_response(
             result.latency_ms,
         )
         return result
+    except MissingApiKeyError:
+        raise
     except Exception as exc:
         logger.warning(
             "Groq call failed | model=%s | error=%s — using mock",
             groq_model,
             exc,
         )
+        if not _allow_mock_fallback():
+            raise
         return _generate_mock_response(groq_model, context)

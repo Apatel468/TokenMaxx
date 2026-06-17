@@ -14,6 +14,7 @@ from database import User, get_db
 from models import AuthResponse, LoginRequest, SignupRequest, UserOut
 from services.auth_dependencies import get_current_user
 from services.auth_service import authenticate_user, create_access_token, register_user
+from services.activity_log_service import record_activity
 from services.timezone_utils import format_timestamp_eastern
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -51,6 +52,14 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> AuthResponse:
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     """Verify email/password and return a JWT session token."""
     user = authenticate_user(db, body.email, body.password)
+    record_activity(
+        db,
+        user_id=user.id,
+        event_type="user_login",
+        message="User logged in.",
+        metadata={"email": user.email},
+    )
+    db.commit()
     return _auth_response(user, db)
 
 

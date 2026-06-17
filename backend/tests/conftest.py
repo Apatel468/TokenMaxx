@@ -14,6 +14,7 @@ import os
 os.environ["GROQ_API_KEY"] = ""
 os.environ["ADMIN_EMAIL"] = ""
 os.environ["ADMIN_PASSWORD"] = ""
+os.environ["ALLOW_MOCK_LLM"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from services.model_clients import ModelResponse
 
 
-def _mock_generate_response(groq_model: str, context, messages=None) -> ModelResponse:
+def _mock_generate_response(groq_model: str, context, messages=None, **kwargs) -> ModelResponse:
     """Deterministic stand-in for Groq/LiteLLM — no network or API key."""
     return ModelResponse(
         text="Mocked LLM response for testing.",
@@ -35,7 +36,7 @@ def _mock_generate_response(groq_model: str, context, messages=None) -> ModelRes
     )
 
 
-def _mock_stream_response(groq_model: str, context, messages=None):
+def _mock_stream_response(groq_model: str, context, messages=None, **kwargs):
     """Yield the same mocked text in word-sized chunks."""
     text = "Mocked LLM response for testing."
     words = text.split()
@@ -49,11 +50,20 @@ def test_db(tmp_path, monkeypatch):
     Point SQLAlchemy at a fresh SQLite file for this test.
 
     Patches database.engine and SessionLocal before the app lifespan runs.
+    Also isolates ChromaDB to a temp directory per test.
     """
     import database as db_module
     import services.groq_models as groq_models
+    import services.vector_store as vector_store
 
     groq_models._catalog_cache = None
+
+    chroma_dir = tmp_path / "chroma"
+    hf_cache = tmp_path / "hf_cache"
+    monkeypatch.setenv("CHROMA_PERSIST_DIR", str(chroma_dir))
+    monkeypatch.setenv("HF_HOME", str(hf_cache))
+    monkeypatch.setenv("SENTENCE_TRANSFORMERS_HOME", str(hf_cache))
+    vector_store.reset_vector_store()
 
     db_file = tmp_path / "test.db"
     url = f"sqlite:///{db_file}"
