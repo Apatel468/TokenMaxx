@@ -14,7 +14,7 @@ from database import User, get_db
 from models import AuthResponse, LoginRequest, SignupRequest, UserOut
 from services.auth_dependencies import get_current_user
 from services.auth_service import authenticate_user, create_access_token, register_user
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.timezone_utils import format_timestamp_eastern
 
 router = APIRouter(prefix="/auth", tags=["auth"])

@@ -21,7 +21,7 @@ from models import (
 )
 from services import vector_store
 from services.auth_dependencies import get_current_user
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.document_processor import (
     MAX_FILE_BYTES,
     chunk_text,

@@ -35,7 +35,7 @@ from services.chat_service import (
     persist_chat_turn,
     prepare_chat_turn,
 )
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.model_clients import (
     MissingApiKeyError,
     _has_groq_key,

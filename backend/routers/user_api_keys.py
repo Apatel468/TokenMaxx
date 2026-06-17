@@ -16,7 +16,7 @@ from models import (
     UserApiKeyOut,
     UserApiKeyUpdate,
 )
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.api_key_service import (
     create_user_api_key,
     delete_user_api_key,

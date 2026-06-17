@@ -23,5 +23,5 @@ export function fetchConversationLogs(conversationId, filters = {}) {
 }
 
 export function fetchAdminLogs(filters = {}) {
-  return authFetch(`/logs/admin/logs${buildQuery(filters)}`);
+  return authFetch(`/admin/logs${buildQuery(filters)}`);
 }

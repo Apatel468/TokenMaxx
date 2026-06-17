@@ -24,7 +24,7 @@ from services.prompt_analyzer import AnalysisResult, analyze_prompt
 from services.prompt_intelligence import PromptAnalysis
 from services.prompt_enhancer import format_enhanced_prompt_for_display
 from services.recommendations import build_top_recommendations
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.rag_service import apply_rag_to_context, rag_metadata_dict, retrieve_for_chat
 from services.router_engine import RoutingDecision, route
 from services.context_builder import PromptContext

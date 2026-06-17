@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import ActivityLog
@@ -20,12 +21,18 @@ _SENSITIVE_METADATA_KEYS = {
     "encrypted_api_key",
     "password",
     "access_token",
+    "refresh_token",
     "token",
     "authorization",
     "jwt",
+    "jwt_token",
+    "bearer_token",
     "raw_prompt",
     "document_text",
+    "document_content",
+    "full_document",
     "chunk_text",
+    "chunk_content",
 }
 
 
@@ -97,3 +104,68 @@ def parse_metadata_json(raw: str | None) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _parse_date(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+    if not value:
+        return None
+    try:
+        if "T" in value:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if end_of_day:
+                parsed = parsed.replace(hour=23, minute=59, second=59)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {value}",
+        ) from exc
+
+
+def fetch_activity_logs(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    event_type: str | None = None,
+    level: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+) -> list[ActivityLog]:
+    """Query activity logs with optional filters."""
+    query = db.query(ActivityLog)
+    if user_id is not None:
+        query = query.filter(ActivityLog.user_id == user_id)
+    if conversation_id is not None:
+        query = query.filter(ActivityLog.conversation_id == conversation_id)
+    if event_type:
+        query = query.filter(ActivityLog.event_type == event_type)
+    if level:
+        query = query.filter(ActivityLog.level == level)
+    start = _parse_date(start_date)
+    end = _parse_date(end_date, end_of_day=True)
+    if start:
+        query = query.filter(ActivityLog.created_at >= start)
+    if end:
+        query = query.filter(ActivityLog.created_at <= end)
+
+    rows = query.order_by(ActivityLog.created_at.desc()).all()
+    if not provider and not model:
+        return rows[:limit]
+
+    filtered: list[ActivityLog] = []
+    for row in rows:
+        meta = parse_metadata_json(row.metadata_json)
+        if provider and meta.get("provider") != provider:
+            continue
+        if model and meta.get("model") != model:
+            continue
+        filtered.append(row)
+    return filtered[:limit]

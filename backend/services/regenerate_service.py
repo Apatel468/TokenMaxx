@@ -14,7 +14,7 @@ from services.context_builder import PromptContext
 from services.conversation_store import get_conversation_or_404
 from services.cost_tracker import estimate_costs, log_request_metrics
 from services.groq_models import get_model_record, get_routable_models
-from services.activity_log_service import record_activity
+from services.activity_logger import record_activity
 from services.model_clients import MissingApiKeyError, generate_response
 from services.model_settings import get_model_disabled_reason
 
