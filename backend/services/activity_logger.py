@@ -5,6 +5,7 @@ Activity log persistence with safe metadata redaction.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,6 +39,25 @@ _SENSITIVE_METADATA_KEYS = {
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def new_request_id() -> str:
+    """Correlation id for all activity logs in one chat/regenerate request."""
+    return str(uuid.uuid4())
+
+
+def with_request_meta(
+    metadata: dict[str, Any] | None = None,
+    *,
+    request_id: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Merge request correlation fields into log metadata."""
+    meta = dict(metadata or {})
+    if request_id:
+        meta["request_id"] = request_id
+    meta.update(extra)
+    return meta
 
 
 def sanitize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:

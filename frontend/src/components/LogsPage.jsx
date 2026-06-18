@@ -1,16 +1,146 @@
 /**
- * LogsPage — activity logs for debugging routing, RAG, and model calls.
+ * LogsPage — grouped activity logs by chat request / action.
  */
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchAdminLogs, fetchMyLogs } from "../api/logs.js";
+import {
+  formatLogTimeShort,
+  groupActivityLogs,
+} from "../utils/groupActivityLogs.js";
 
 const LEVELS = ["", "info", "warning", "error"];
+
+function statusClass(status) {
+  if (status === "error") return "logs-status logs-status--error";
+  if (status === "in_progress") return "logs-status logs-status--progress";
+  return "logs-status logs-status--success";
+}
+
+function statusLabel(status) {
+  if (status === "error") return "Error";
+  if (status === "in_progress") return "In progress";
+  return "Success";
+}
+
+function levelClass(level) {
+  if (level === "error") return "logs-level logs-level--error";
+  if (level === "warning") return "logs-level logs-level--warning";
+  return "logs-level logs-level--info";
+}
+
+function kindLabel(kind) {
+  if (kind === "regenerate") return "Regenerate";
+  if (kind === "document") return "Document";
+  if (kind === "chat") return "Chat";
+  return "Activity";
+}
+
+function LogEventRow({ event, showMeta, onToggleMeta }) {
+  const meta = event.metadata || {};
+  const hasMeta = Object.keys(meta).length > 0;
+  const modelProvider = [meta.model, meta.provider].filter(Boolean).join(" · ");
+
+  return (
+    <li className="logs-timeline__item">
+      <div className="logs-timeline__row">
+        <span className="logs-timeline__time">{formatLogTimeShort(event.created_at)}</span>
+        <span className={levelClass(event.level)}>{event.level}</span>
+        <span className="logs-timeline__event">{event.event_type}</span>
+        <span className="logs-timeline__message">{event.message}</span>
+        {modelProvider && (
+          <span className="logs-timeline__meta">{modelProvider}</span>
+        )}
+        {hasMeta && (
+          <button
+            type="button"
+            className="logs-timeline__meta-btn"
+            onClick={() => onToggleMeta(event.id)}
+          >
+            {showMeta ? "Hide meta" : "Meta"}
+          </button>
+        )}
+      </div>
+      {showMeta && hasMeta && (
+        <pre className="logs-metadata logs-metadata--inline">
+          {JSON.stringify(meta, null, 2)}
+        </pre>
+      )}
+    </li>
+  );
+}
+
+function LogGroupCard({ group, isAdmin, expanded, onToggle }) {
+  const [expandedMetaId, setExpandedMetaId] = useState(null);
+
+  const title =
+    group.kind === "regenerate"
+      ? `Regenerate: ${group.promptPreview}`
+      : group.promptPreview;
+
+  return (
+    <article className="logs-group-card">
+      <div className="logs-group-card__summary">
+        <div className="logs-group-card__main">
+          <div className="logs-group-card__top">
+            <span className="logs-group-card__kind">{kindLabel(group.kind)}</span>
+            <time className="logs-group-card__time">{group.timestamp}</time>
+            {isAdmin && group.userEmail && (
+              <span className="logs-group-card__user">{group.userEmail}</span>
+            )}
+          </div>
+          <p className="logs-group-card__prompt">{title}</p>
+          <div className="logs-group-card__stats">
+            <span className={statusClass(group.status)}>
+              {statusLabel(group.status)}
+            </span>
+            {group.model && (
+              <span className="logs-group-card__stat">
+                Model: <strong>{group.model}</strong>
+              </span>
+            )}
+            {group.provider && (
+              <span className="logs-group-card__stat">
+                Provider: <strong>{group.provider}</strong>
+              </span>
+            )}
+            <span className="logs-group-card__stat">
+              Events: <strong>{group.eventCount}</strong>
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="documents-refresh logs-group-card__toggle"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          {expanded ? "Hide Timeline" : "View Timeline"}
+        </button>
+      </div>
+
+      {expanded && (
+        <ol className="logs-timeline">
+          {group.events.map((event) => (
+            <LogEventRow
+              key={event.id}
+              event={event}
+              showMeta={expandedMetaId === event.id}
+              onToggleMeta={(id) =>
+                setExpandedMetaId((current) => (current === id ? null : id))
+              }
+            />
+          ))}
+        </ol>
+      )}
+    </article>
+  );
+}
 
 function LogsPage({ isAdmin = false }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
+  const [expandedGroupId, setExpandedGroupId] = useState(null);
   const [adminView, setAdminView] = useState(false);
   const [filters, setFilters] = useState({
     event_type: "",
@@ -42,11 +172,7 @@ function LogsPage({ isAdmin = false }) {
     load();
   }, [load]);
 
-  function levelClass(level) {
-    if (level === "error") return "logs-level logs-level--error";
-    if (level === "warning") return "logs-level logs-level--warning";
-    return "logs-level logs-level--info";
-  }
+  const groups = useMemo(() => groupActivityLogs(logs), [logs]);
 
   return (
     <div className="logs-page">
@@ -54,7 +180,7 @@ function LogsPage({ isAdmin = false }) {
         <div>
           <h2 className="documents-header__title">Activity Logs</h2>
           <p className="documents-header__subtitle">
-            Timestamped backend events for routing, RAG, prompt enhancement, and model calls.
+            Grouped by chat request — expand a card to see the full pipeline timeline.
           </p>
         </div>
         <div className="logs-header__actions">
@@ -145,61 +271,23 @@ function LogsPage({ isAdmin = false }) {
             <div className="spinner" />
             <p>Loading logs…</p>
           </div>
-        ) : logs.length === 0 ? (
+        ) : groups.length === 0 ? (
           <p className="documents-empty">No logs match your filters.</p>
         ) : (
-          <div className="logs-table-wrap">
-            <table className="logs-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Level</th>
-                  <th>Event</th>
-                  <th>Message</th>
-                  <th>Model / Provider</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((row) => {
-                  const meta = row.metadata || {};
-                  const modelProvider = [meta.model, meta.provider].filter(Boolean).join(" · ");
-                  return (
-                    <Fragment key={row.id}>
-                      <tr>
-                        <td className="logs-table__time">{row.created_at}</td>
-                        <td>
-                          <span className={levelClass(row.level)}>{row.level}</span>
-                        </td>
-                        <td className="logs-table__event">{row.event_type}</td>
-                        <td>{row.message}</td>
-                        <td className="logs-table__meta">{modelProvider || "—"}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="documents-refresh"
-                            onClick={() =>
-                              setExpandedId((id) => (id === row.id ? null : row.id))
-                            }
-                          >
-                            {expandedId === row.id ? "Hide" : "Details"}
-                          </button>
-                        </td>
-                      </tr>
-                      {expandedId === row.id && (
-                        <tr className="logs-table__expand">
-                          <td colSpan={6}>
-                            <pre className="logs-metadata">
-                              {JSON.stringify(row.metadata || {}, null, 2)}
-                            </pre>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="logs-groups">
+            {groups.map((group) => (
+              <LogGroupCard
+                key={`${group.id}-${group.timestamp}`}
+                group={group}
+                isAdmin={isAdmin && adminView}
+                expanded={expandedGroupId === group.id}
+                onToggle={() =>
+                  setExpandedGroupId((current) =>
+                    current === group.id ? null : group.id
+                  )
+                }
+              />
+            ))}
           </div>
         )}
       </section>

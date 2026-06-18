@@ -1,14 +1,11 @@
 """
-Model Clients — send prompts to Groq via LiteLLM (Phase 2).
+Model Clients — send prompts to LLM providers via LiteLLM.
 
 Flow for every request:
-  1. Router picks a Groq model from config/models.yaml.
-  2. Check if GROQ_API_KEY is set in the environment (.env loaded at startup).
-  3. If yes  → litellm.completion() with groq/<model> → real response.
-  4. If no   → mock response (app still works for demos).
-
-We never read .env directly — python-dotenv loads keys into os.environ
-and we only check whether GROQ_API_KEY is present (not its value).
+  1. Router picks a model from model_registry.py (any enabled provider).
+  2. Resolve API key: user key first, then app-level env key for that provider.
+  3. If yes  → litellm.completion() with provider-specific model id.
+  4. If no   → mock response (when ALLOW_MOCK_LLM=true).
 """
 
 import logging
@@ -19,16 +16,15 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from config.model_registry import get_provider_for_model, to_litellm_model
 from services.context_builder import PromptContext
 from services.response_cleaner import clean_model_response
 
-# Load .env into environment variables once at import time
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 GROQ_ENV_KEY = "GROQ_API_KEY"
-DEFAULT_PROVIDER = "groq"
 
 
 class MissingApiKeyError(Exception):
@@ -42,7 +38,7 @@ class MissingApiKeyError(Exception):
         )
         super().__init__(self.detail)
 
-# Extra system instruction for Qwen models that may emit chain-of-thought tags
+
 _QWEN_MODEL_ID = "qwen/qwen3-32b"
 _QWEN_SYSTEM_SUFFIX = (
     "Do not include internal reasoning, chain-of-thought, or <think> tags. "
@@ -52,7 +48,7 @@ _QWEN_SYSTEM_SUFFIX = (
 
 @dataclass
 class ModelResponse:
-    """Unified response — works for both real Groq and mock completions."""
+    """Unified response — works for real API and mock completions."""
 
     text: str
     estimated_output_tokens: int
@@ -60,9 +56,9 @@ class ModelResponse:
     is_mock: bool = False
     latency_ms: float = 0.0
     litellm_model: str = ""
+    provider: str = "groq"
 
 
-# Mock templates when GROQ_API_KEY is missing or the API call fails
 _MOCK_TEMPLATES: dict[str, str] = {
     "coding": "Starter code approach for your request...",
     "flashcards": "Card 1\nQ: Key term?\nA: Definition.",
@@ -76,13 +72,11 @@ _MOCK_TEMPLATES: dict[str, str] = {
 
 
 def _allow_mock_fallback() -> bool:
-    """When true, missing keys fall back to mock responses (local demo default)."""
     return os.getenv("ALLOW_MOCK_LLM", "true").lower() in ("1", "true", "yes")
 
 
-def _provider_for_model(groq_model: str) -> str:
-    """TokenMaxx routing currently uses Groq models."""
-    return DEFAULT_PROVIDER
+def _provider_for_model(model_id: str) -> str:
+    return get_provider_for_model(model_id)
 
 
 def _resolve_api_key(db, user_id: int | None, provider: str) -> str | None:
@@ -92,11 +86,6 @@ def _resolve_api_key(db, user_id: int | None, provider: str) -> str | None:
 
 
 def _has_groq_key() -> bool:
-    """
-    Return True if GROQ_API_KEY exists in the environment.
-
-    We only check presence — never log or expose the key value.
-    """
     return bool(os.getenv(GROQ_ENV_KEY, "").strip())
 
 
@@ -104,56 +93,36 @@ def _has_provider_key(db, user_id: int | None, provider: str) -> bool:
     return bool(_resolve_api_key(db, user_id, provider))
 
 
-def _to_litellm_model(groq_model: str) -> str:
-    """
-    Convert YAML model name to LiteLLM format.
-
-    Examples:
-      llama-3.3-70b-versatile  → groq/llama-3.3-70b-versatile
-      qwen/qwen3-32b           → groq/qwen/qwen3-32b
-    """
-    if groq_model.startswith("groq/"):
-        return groq_model
-    return f"groq/{groq_model}"
+def has_provider_key(db, user_id: int | None, provider: str) -> bool:
+    """Public check for whether a provider key is configured."""
+    return _has_provider_key(db, user_id, provider)
 
 
-def _is_qwen_model(groq_model: str) -> bool:
-    """Return True when the routed model is Qwen (needs no-thinking system hint)."""
-    normalized = groq_model.lower().replace("groq/", "")
+def _is_qwen_model(model_id: str) -> bool:
+    normalized = model_id.lower().replace("groq/", "")
     return "qwen" in normalized or normalized == _QWEN_MODEL_ID
 
 
-def _build_system_prompt(context: PromptContext, groq_model: str) -> str:
-    """
-    Combine the enhancer system prompt with model-specific instructions.
-
-    Qwen models get an extra line telling them not to emit thinking tags.
-    """
+def _build_system_prompt(context: PromptContext, model_id: str) -> str:
     parts: list[str] = []
     if context.system_prompt:
         parts.append(context.system_prompt.strip())
-    if _is_qwen_model(groq_model):
+    if _is_qwen_model(model_id):
         parts.append(_QWEN_SYSTEM_SUFFIX)
     return "\n\n".join(parts)
 
 
 def _build_litellm_messages(
     context: PromptContext,
-    groq_model: str,
+    model_id: str,
     messages: list[dict] | None = None,
 ) -> list[dict]:
-    """
-    Build the message list for LiteLLM.
-
-    Phase 4: prepends system_prompt, then conversation history with the
-    enhanced latest user message from context_builder.
-    """
     history = messages or context.message_history or [
         {"role": "user", "content": context.enhanced_prompt or context.prompt}
     ]
 
     litellm_messages: list[dict] = []
-    system_prompt = _build_system_prompt(context, groq_model)
+    system_prompt = _build_system_prompt(context, model_id)
     if system_prompt:
         litellm_messages.append({"role": "system", "content": system_prompt})
     litellm_messages.extend(history)
@@ -161,11 +130,6 @@ def _build_litellm_messages(
 
 
 def _finalize_response(response: ModelResponse) -> ModelResponse:
-    """
-    Strip thinking tags from model text before API/DB storage.
-
-    Token counts are left as reported by the API (cost estimate unchanged).
-    """
     cleaned = clean_model_response(response.text)
     if cleaned != response.text:
         logger.info(
@@ -180,27 +144,23 @@ def _finalize_response(response: ModelResponse) -> ModelResponse:
         is_mock=response.is_mock,
         latency_ms=response.latency_ms,
         litellm_model=response.litellm_model,
+        provider=response.provider,
     )
 
 
-def _call_groq(
-    groq_model: str,
+def _call_provider(
+    model_id: str,
     context: PromptContext,
     messages: list[dict] | None = None,
     *,
     api_key: str | None = None,
+    provider: str | None = None,
 ) -> ModelResponse:
-    """
-    Call Groq through LiteLLM.
-
-    Uses system prompt + full conversation history (Phase 4 enhanced).
-    """
     import litellm
 
-    litellm_model = _to_litellm_model(groq_model)
-    litellm_messages = _build_litellm_messages(
-        context, groq_model, messages=messages
-    )
+    resolved_provider = provider or _provider_for_model(model_id)
+    litellm_model = to_litellm_model(model_id)
+    litellm_messages = _build_litellm_messages(context, model_id, messages=messages)
 
     start = time.perf_counter()
     kwargs: dict = {"model": litellm_model, "messages": litellm_messages}
@@ -224,21 +184,22 @@ def _call_groq(
             is_mock=False,
             latency_ms=round(latency_ms, 1),
             litellm_model=litellm_model,
+            provider=resolved_provider,
         )
     )
 
 
-def _generate_mock_response(groq_model: str, context: PromptContext) -> ModelResponse:
-    """Canned response when GROQ_API_KEY is missing or Groq returns an error."""
+def _generate_mock_response(model_id: str, context: PromptContext) -> ModelResponse:
     start = time.perf_counter()
+    provider = _provider_for_model(model_id)
 
     base = _MOCK_TEMPLATES.get(context.task_type, _MOCK_TEMPLATES["general_qa"])
     text = (
-        f"[Mock response — Groq / {groq_model}]\n\n"
+        f"[Mock response — {provider} / {model_id}]\n\n"
         f"Task: {context.task_type}\n\n"
         f"{base}\n\n"
         f"---\n"
-        f"Set GROQ_API_KEY in backend/.env for real Groq responses."
+        f"Add an API key for {provider} under Model Controls → API Keys."
     )
     output_tokens = max(len(text) // 4, 1)
     latency_ms = (time.perf_counter() - start) * 1000
@@ -251,12 +212,12 @@ def _generate_mock_response(groq_model: str, context: PromptContext) -> ModelRes
             is_mock=True,
             latency_ms=round(latency_ms, 1),
             litellm_model="mock",
+            provider=provider,
         )
     )
 
 
 def _fake_stream_chunks(text: str) -> Iterator[str]:
-    """Yield text word-by-word when real streaming is unavailable."""
     words = text.split()
     if not words:
         return
@@ -264,20 +225,17 @@ def _fake_stream_chunks(text: str) -> Iterator[str]:
         yield word if index == 0 else f" {word}"
 
 
-def _call_groq_stream(
-    groq_model: str,
+def _call_provider_stream(
+    model_id: str,
     context: PromptContext,
     messages: list[dict] | None = None,
     *,
     api_key: str | None = None,
 ) -> Iterator[str]:
-    """Stream Groq completion chunks via LiteLLM."""
     import litellm
 
-    litellm_model = _to_litellm_model(groq_model)
-    litellm_messages = _build_litellm_messages(
-        context, groq_model, messages=messages
-    )
+    litellm_model = to_litellm_model(model_id)
+    litellm_messages = _build_litellm_messages(context, model_id, messages=messages)
 
     kwargs: dict = {
         "model": litellm_model,
@@ -301,28 +259,25 @@ def stream_response(
     db=None,
     user_id: int | None = None,
 ) -> Iterator[str]:
-    """
-    Yield response text chunks for SSE streaming.
-
-    Uses real Groq streaming when available; otherwise fakes word-by-word
-    delivery from the mock/fallback full response.
-    """
-    provider = _provider_for_model(groq_model)
+    """Yield response text chunks for SSE streaming."""
+    model_id = groq_model
+    provider = _provider_for_model(model_id)
     api_key = _resolve_api_key(db, user_id, provider)
     if not api_key:
         if not _allow_mock_fallback():
             raise MissingApiKeyError(provider)
         logger.info(
-            "Mock stream fallback | groq_model=%s | reason=no provider key",
-            groq_model,
+            "Mock stream fallback | model=%s | provider=%s | reason=no provider key",
+            model_id,
+            provider,
         )
-        mock = _generate_mock_response(groq_model, context)
+        mock = _generate_mock_response(model_id, context)
         yield from _fake_stream_chunks(mock.text)
         return
 
     try:
-        yield from _call_groq_stream(
-            groq_model, context, messages=messages, api_key=api_key
+        yield from _call_provider_stream(
+            model_id, context, messages=messages, api_key=api_key
         )
         if db is not None and user_id is not None:
             from services.api_key_service import mark_provider_key_used
@@ -332,13 +287,14 @@ def stream_response(
         raise
     except Exception as exc:
         logger.warning(
-            "Groq stream failed | model=%s | error=%s — fake streaming mock",
-            groq_model,
+            "Stream failed | model=%s | provider=%s | error=%s — fake streaming mock",
+            model_id,
+            provider,
             exc,
         )
         if not _allow_mock_fallback():
             raise
-        mock = _generate_mock_response(groq_model, context)
+        mock = _generate_mock_response(model_id, context)
         yield from _fake_stream_chunks(mock.text)
 
 
@@ -351,8 +307,9 @@ def build_response_from_stream(
     litellm_model: str = "",
     input_tokens: int | None = None,
     is_mock: bool = False,
+    provider: str | None = None,
 ) -> ModelResponse:
-    """Build a ModelResponse after all stream chunks have been collected."""
+    model_id = groq_model
     output_tokens = max(len(accumulated_text) // 4, 1)
     return _finalize_response(
         ModelResponse(
@@ -361,7 +318,8 @@ def build_response_from_stream(
             input_tokens=input_tokens,
             is_mock=is_mock,
             latency_ms=round(latency_ms, 1),
-            litellm_model=litellm_model or _to_litellm_model(groq_model),
+            litellm_model=litellm_model or to_litellm_model(model_id),
+            provider=provider or _provider_for_model(model_id),
         )
     )
 
@@ -374,33 +332,32 @@ def generate_response(
     db=None,
     user_id: int | None = None,
 ) -> ModelResponse:
-    """
-    Main entry point — called by POST /chat after the router picks a model.
-
-    Pass `messages` for multi-turn chats (full history including new user msg).
-    """
-    provider = _provider_for_model(groq_model)
+    """Main entry point — called after the router picks a model."""
+    model_id = groq_model
+    provider = _provider_for_model(model_id)
     api_key = _resolve_api_key(db, user_id, provider)
     if not api_key:
         if not _allow_mock_fallback():
             raise MissingApiKeyError(provider)
         logger.info(
-            "Mock fallback | groq_model=%s | reason=no provider key",
-            groq_model,
+            "Mock fallback | model=%s | provider=%s | reason=no provider key",
+            model_id,
+            provider,
         )
-        return _generate_mock_response(groq_model, context)
+        return _generate_mock_response(model_id, context)
 
     try:
-        result = _call_groq(
-            groq_model, context, messages=messages, api_key=api_key
+        result = _call_provider(
+            model_id, context, messages=messages, api_key=api_key, provider=provider
         )
         if db is not None and user_id is not None:
             from services.api_key_service import mark_provider_key_used
 
             mark_provider_key_used(db, user_id, provider)
         logger.info(
-            "Groq success | model=%s | input_tokens=%s | output_tokens=%s | "
-            "latency_ms=%.1f",
+            "LLM success | provider=%s | model=%s | input_tokens=%s | "
+            "output_tokens=%s | latency_ms=%.1f",
+            result.provider,
             result.litellm_model,
             result.input_tokens,
             result.estimated_output_tokens,
@@ -411,10 +368,11 @@ def generate_response(
         raise
     except Exception as exc:
         logger.warning(
-            "Groq call failed | model=%s | error=%s — using mock",
-            groq_model,
+            "LLM call failed | model=%s | provider=%s | error=%s — using mock",
+            model_id,
+            provider,
             exc,
         )
         if not _allow_mock_fallback():
             raise
-        return _generate_mock_response(groq_model, context)
+        return _generate_mock_response(model_id, context)

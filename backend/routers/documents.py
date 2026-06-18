@@ -21,7 +21,7 @@ from models import (
 )
 from services import vector_store
 from services.auth_dependencies import get_current_user
-from services.activity_logger import record_activity
+from services.activity_logger import new_request_id, record_activity, with_request_meta
 from services.document_processor import (
     MAX_FILE_BYTES,
     chunk_text,
@@ -62,12 +62,18 @@ async def upload_document(
         )
 
     file_type = detect_file_type(file.filename)
+    request_id = new_request_id()
     record_activity(
         db,
         user_id=current_user.id,
         event_type="document_upload_started",
         message="Document upload started.",
-        metadata={"filename": file.filename, "file_type": file_type},
+        metadata=with_request_meta(
+            request_id=request_id,
+            filename=file.filename,
+            file_type=file_type,
+            prompt_preview=file.filename,
+        ),
     )
     file_bytes = await file.read()
     if not file_bytes:
@@ -114,11 +120,12 @@ async def upload_document(
         user_id=current_user.id,
         event_type="document_indexed",
         message="Document indexed and ready for RAG.",
-        metadata={
-            "document_id": document.id,
-            "filename": document.filename,
-            "chunk_count": document.chunk_count,
-        },
+        metadata=with_request_meta(
+            request_id=request_id,
+            document_id=document.id,
+            filename=document.filename,
+            chunk_count=document.chunk_count,
+        ),
     )
     db.commit()
     return DocumentUploadResponse(document=_to_document_out(document))

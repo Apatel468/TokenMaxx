@@ -1,7 +1,7 @@
 # TokenMaxx — Roadmap
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.5.0 · **Last updated:** June 2026
+> **Version:** 0.6.0 · **Last updated:** June 2026
 
 ---
 
@@ -56,17 +56,25 @@
 - [x] Tests: `test_api_keys.py`
 
 ### M20 — Activity Logs (v0.5.0)
-- [x] `activity_logs` table + structured event service
+- [x] `activity_logs` table + structured event service (`activity_logger.py`)
 - [x] Pipeline logging (classify, enhance, RAG, route, model calls)
 - [x] Document and API key event logging
-- [x] Logs tab UI (`LogsPage.jsx`); admin sees all users
+- [x] Logs tab UI (`LogsPage.jsx`); admin sees all via `/admin/logs`
 - [x] Tests: `test_activity_logs.py`
+
+### M21 — Multi-Provider Routing (v0.6.0)
+- [x] `MODEL_ALLOWLIST` — Groq, OpenAI, Anthropic models in `model_registry.py`
+- [x] Per-provider API key resolution in `model_clients.py`
+- [x] Provider-key filtering in `model_scorer.py` / `router_engine.py`
+- [x] Provider badges in routing panel; `provider` on model runs
+- [x] Analytics provider breakdown (`GET /analytics/provider-usage`)
+- [x] Tests: `test_provider_routing.py`, `test_premium_routing.py`, `test_provider_analytics.py`
 
 ---
 
 ## Current Milestone
 
-**M21 — Production Hardening**
+**M22 — Production Hardening**
 
 | Task | Status |
 |------|--------|
@@ -76,12 +84,13 @@
 | Context window truncation | ⬜ |
 | Mobile layout | ⬜ |
 | Streaming regenerate | ⬜ |
+| Google Gemini chat models in catalog | ⬜ |
+| AWS Bedrock integration (beyond placeholder) | ⬜ |
 
 ---
 
 ## Future Phases
 
-- **Phase 6** — Multi-provider (OpenAI, Anthropic, Gemini)
 - **Phase 7** — Rate limits, budgets, org policies
 - **Phase 8** — Docker, CI/CD, Alembic
 
@@ -89,19 +98,19 @@
 
 ## Production Readiness
 
-**Current score:** ~85% production ready
+**Current score:** ~88% production ready
 
 | Area | Status |
 |------|--------|
-| Core routing | ✅ Task-aware complexity scoring |
+| Core routing | ✅ Task-aware complexity scoring + multi-provider |
 | Prompt Intelligence | ✅ v2 analyze + enhance |
 | Streaming chat | ✅ SSE `/chat/stream` |
 | RAG | ✅ Document upload + chat context |
 | Task classification | ✅ LLM + keyword fallback |
 | Model regenerate | ✅ On-demand (non-streaming) |
-| User API keys | ✅ Encrypted storage + resolution |
+| User API keys | ✅ Encrypted storage + per-provider resolution |
 | Activity logs | ✅ Pipeline + admin viewer |
 | Authentication | ✅ JWT + roles |
-| Analytics export | ✅ CSV (client-side) |
-| Tests | ✅ 59 pytest tests |
+| Analytics | ✅ KPIs + model/provider breakdown + CSV export |
+| Tests | ✅ 85 pytest tests |
 | Deploy | ✅ Render + Vercel guides |

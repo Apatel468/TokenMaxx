@@ -30,7 +30,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from database import engine, init_db
+from database import engine, get_sqlite_database_path, init_db
 from routers import (
     admin,
     analytics,
@@ -48,7 +48,7 @@ from routers import (
 from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
-API_VERSION = "0.5.0"
+API_VERSION = "0.6.0"
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
@@ -131,6 +131,9 @@ def health_check():
     """
     database = _database_health()
     overall_ok = database["status"] == "ok"
+    sqlite_path = get_sqlite_database_path()
+    if sqlite_path:
+        database["sqlite_path"] = sqlite_path
 
     return {
         "status": "ok" if overall_ok else "degraded",

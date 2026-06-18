@@ -51,16 +51,28 @@ function ApiKeysSection() {
     setError(null);
     setSuccess(null);
     try {
-      await createApiKey({
+      const created = await createApiKey({
         provider: form.provider,
         api_key: form.api_key.trim(),
         key_label: form.key_label.trim() || form.provider,
       });
+      if (!created?.id || !created?.masked_key || created.api_key) {
+        throw new Error("Unexpected response when saving API key.");
+      }
+      const rows = await fetchApiKeys();
+      const persisted = Array.isArray(rows)
+        && rows.some((row) => row.id === created.id);
+      if (!persisted) {
+        throw new Error(
+          "API key save could not be verified. Check VITE_API_BASE matches the backend database you are inspecting.",
+        );
+      }
+      setKeys(rows);
       setForm({ provider: "groq", key_label: "", api_key: "" });
       setSuccess("API key saved. Masked key shown below.");
-      await load();
     } catch (err) {
       setError(err.message || "Could not save API key.");
+      await load();
     } finally {
       setSaving(false);
     }

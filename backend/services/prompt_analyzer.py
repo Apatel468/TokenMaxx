@@ -26,6 +26,7 @@ TASK_TYPES = [
     "research",
     "creative",
     "report",
+    "business",
     "classification",
 ]
 
@@ -58,7 +59,7 @@ _KEYWORD_RULES: dict[str, list[str]] = {
         "blog post", "essay", "draft", "compose", "lyrics", "script",
     ],
     "writing": [
-        "write", "rewrite", "edit", "paragraph", "email", "letter",
+        "rewrite", "edit", "paragraph", "email", "letter",
         "tone", "wording", "proofread",
     ],
     "research": [
@@ -75,7 +76,13 @@ _KEYWORD_RULES: dict[str, list[str]] = {
     ],
     "report": [
         "report", "briefing", "memo", "white paper", "executive summary",
-        "findings", "recommendations",
+        "findings", "recommendations", "rfp", "proposal", "board presentation",
+    ],
+    "business": [
+        "business strategy", "fortune 500", "executive strategy", "market strategy",
+        "go-to-market", "go to market", "competitive analysis", "enterprise",
+        "implementation roadmap", "compliance", "procurement", "strategic plan",
+        "stakeholders", "risk analysis", "financial impact", "strategy",
     ],
     "classification": [
         "classify", "categorize", "label", "tag", "sort into",

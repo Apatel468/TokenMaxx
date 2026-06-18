@@ -1,7 +1,7 @@
 # TokenMaxx — Architecture
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.5.0 · **Last updated:** June 2026
+> **Version:** 0.6.0 · **Last updated:** June 2026
 
 ---
 
@@ -26,7 +26,8 @@
 │  └─────────────────┬────────────────────────────────────────┘   │
 │                    │                                              │
 │  ┌─────────────────▼──────────┐  ┌──────────────────────────┐  │
-│  │  LiteLLM → Groq API        │  │  ChromaDB (vector_store) │  │
+│  │  LiteLLM → Groq / OpenAI   │  │  ChromaDB (vector_store) │  │
+│  │           / Anthropic       │  │                          │  │
 │  └────────────────────────────┘  └──────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  SQLite — users, conversations, messages, model_runs,     │   │
@@ -44,29 +45,35 @@ backend/
 ├── main.py                 # FastAPI app, CORS, routers
 ├── database.py             # SQLAlchemy models
 ├── config/
-│   └── model_registry.py   # Groq allowlist + scores
+│   ├── model_registry.py   # Multi-provider allowlist + scores
+│   └── models.yaml         # Task profiles and scoring weights
 ├── routers/
 │   ├── auth.py
 │   ├── chat.py             # /chat, /chat/stream, /chat/regenerate
 │   ├── conversations.py
+│   ├── analytics.py        # summary, history, model-usage, provider-usage
 │   ├── model_settings.py
 │   ├── user_preferences.py
 │   ├── documents.py        # upload, list, search, delete
 │   ├── user_api_keys.py    # CRUD + test
-│   └── logs.py             # activity log queries
+│   ├── logs.py             # GET /logs/my, /logs/conversation/{id}
+│   └── admin.py            # employee-usage, user-metrics, /admin/logs
 ├── services/
 │   ├── chat_service.py     # Full pipeline orchestration
+│   ├── router_engine.py    # Score enabled models, pick best
 │   ├── rag_service.py      # Retrieve + inject document context
 │   ├── vector_store.py     # ChromaDB wrapper
 │   ├── document_processor.py
 │   ├── api_key_service.py
-│   ├── activity_log_service.py
-│   ├── model_clients.py    # LiteLLM + key resolution
+│   ├── activity_logger.py
+│   ├── model_clients.py    # LiteLLM + per-provider key resolution
+│   ├── groq_models.py      # Model catalog sync
 │   ├── llm_classifier.py
 │   ├── prompt_intelligence.py
 │   ├── model_scorer.py
+│   ├── report_generator.py
 │   └── ...
-└── tests/                  # 59 tests
+└── tests/                  # 85 tests
 ```
 
 ---
@@ -89,7 +96,7 @@ analyze_and_enhance()    ← prompt_intelligence v2 (if enabled)
 retrieve_rag_context()   ← ChromaDB top-3 chunks (rag_service)
     │
     ▼
-route()                  ← model_scorer + allowlist
+route()                  ← router_engine + model_scorer (provider-key filter)
     │
     ▼
 generate / stream        ← model_clients (user key → env key → mock)
@@ -97,6 +104,19 @@ generate / stream        ← model_clients (user key → env key → mock)
     ▼
 persist + analytics + activity log
 ```
+
+---
+
+## Model Catalog
+
+| Provider | Chat models | Notes |
+|----------|-------------|-------|
+| Groq | 6 models | Synced against live Groq API when `GROQ_API_KEY` set |
+| OpenAI | gpt-4o-mini, gpt-4o, o3-mini | Registry metadata only |
+| Anthropic | claude-3-5-sonnet, claude-3-haiku | Registry metadata only |
+| Audio | whisper-large-v3 | Cataloged; not chat-routable |
+
+`MODEL_ALLOWLIST` in `model_registry.py` is the source of truth. `CHAT_MODEL_IDS` excludes whisper.
 
 ---
 
@@ -119,23 +139,27 @@ Env: `CHROMA_PERSIST_DIR`, `RAG_SIMILARITY_THRESHOLD` (default 0.4).
 | Layer | Storage | Usage |
 |-------|---------|-------|
 | User keys | `user_api_keys` table, Fernet-encrypted | Chat + regenerate (per provider) |
-| App keys | `.env` (`GROQ_API_KEY`) | Fallback; classifier/enhancer/title |
+| App keys | `.env` per provider | Fallback; classifier/enhancer/title (Groq only) |
 | Mock | `ALLOW_MOCK_LLM=true` | Local demos without keys |
 
-Resolution order in `model_clients.resolve_api_key()`: user → env → mock.
+Supported providers: `groq`, `openai`, `anthropic`, `google`, `bedrock` (placeholder).
+
+Resolution order in `model_clients`: user key → env key → mock (per provider).
+
+Routing in `model_scorer.filter_candidates_by_provider_keys()` keeps only models whose provider has a key. If no provider has keys, all candidates remain (mock mode).
 
 ---
 
 ## Activity Logs
 
-`activity_log_service` records structured events:
+`activity_logger.py` records structured events:
 
 - Chat pipeline steps (classify, enhance, RAG, route, model call)
 - Document upload/delete
 - API key CRUD
 - Login
 
-Metadata is sanitized (no raw API keys). Endpoints: `GET /logs/my`, `GET /logs/conversation/{id}`, `GET /logs/admin/logs`.
+Metadata is sanitized (no raw API keys). Endpoints: `GET /logs/my`, `GET /logs/conversation/{id}`, `GET /admin/logs`.
 
 ---
 
@@ -145,15 +169,17 @@ Metadata is sanitized (no raw API keys). Endpoints: `GET /logs/my`, `GET /logs/c
 frontend/src/
 ├── App.jsx                 # Tab navigation
 ├── components/
-│   ├── ChatPage.jsx        # Streaming + routing + RAG badges
+│   ├── ChatPage.jsx        # Streaming + routing + provider/RAG badges
 │   ├── DocumentsPage.jsx   # Upload/list/delete
 │   ├── LogsPage.jsx        # Activity log viewer
+│   ├── AnalyticsDashboard.jsx  # KPIs + model/provider tables
 │   ├── ModelControls.jsx   # Toggles + ApiKeysSection
 │   └── ...
 └── api/
     ├── chat.js             # streamChat() via fetch + ReadableStream
+    ├── analytics.js        # summary, model-usage, provider-usage
     ├── documents.js
-    └── ...
+    └── apiKeys.js
 ```
 
 ---
@@ -165,7 +191,7 @@ frontend/src/
 | Event | Payload |
 |-------|---------|
 | `routing_start` | — |
-| `routing_complete` | task, model, scores, RAG metadata |
+| `routing_complete` | task, model, provider, scores, provider_availability, RAG metadata |
 | `token` | `{ "content": "..." }` |
 | `complete` | full message + analytics + RAG fields |
 | `error` | error message |
@@ -181,7 +207,7 @@ Frontend default: `streamChat()` in `api/chat.js`.
 | `users` | Auth, role (user/admin) |
 | `conversations` | Per-user threads |
 | `messages` | User + assistant content |
-| `model_runs` | Routing metadata, costs, enhanced prompt |
+| `model_runs` | Routing metadata, provider, costs, enhanced prompt |
 | `uploaded_documents` | RAG file metadata |
 | `user_api_keys` | Encrypted provider keys |
 | `activity_logs` | Timestamped events |
@@ -192,7 +218,9 @@ Frontend default: `streamChat()` in `api/chat.js`.
 
 | Service | Usage |
 |---------|-------|
-| Groq API | LLM inference (chat, classify, enhance, title) |
+| Groq API | LLM inference, classify, enhance, title; Groq model sync |
+| OpenAI API | gpt-4o-mini, gpt-4o, o3-mini inference |
+| Anthropic API | Claude inference |
 | ChromaDB | Local vector persistence |
 | sentence-transformers | Document + query embeddings |
 

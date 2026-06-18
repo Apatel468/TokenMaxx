@@ -1,18 +1,17 @@
 """
-Model Registry — curated metadata for Groq models allowed in TokenMaxx.
+Model Registry — curated metadata for all providers allowed in TokenMaxx.
 
-Only models in GROQ_MODEL_ALLOWLIST are synced, routed, or shown in Model Controls.
-Chat routing uses GROQ_CHAT_MODEL_IDS (excludes whisper-large-v3).
+Models in MODEL_ALLOWLIST are synced, routed, and shown in Model Controls.
+Chat routing uses CHAT_MODEL_IDS (excludes whisper-large-v3).
 """
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
-# ---------------------------------------------------------------------------
-# Groq allowlist — sole source of model ids for this deployment
-# ---------------------------------------------------------------------------
+ProviderName = Literal["groq", "openai", "anthropic", "google"]
 
+# Groq-hosted models (checked against live Groq API when GROQ_API_KEY is set)
 GROQ_MODEL_ALLOWLIST: frozenset[str] = frozenset(
     {
         "llama-3.1-8b-instant",
@@ -25,13 +24,29 @@ GROQ_MODEL_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# Chat-completion models eligible for routing / Model Controls toggles
-GROQ_CHAT_MODEL_IDS: frozenset[str] = frozenset(
-    GROQ_MODEL_ALLOWLIST - {"whisper-large-v3"}
+# All routable / catalog models across providers
+MODEL_ALLOWLIST: frozenset[str] = GROQ_MODEL_ALLOWLIST | frozenset(
+    {
+        "gpt-4o-mini",
+        "gpt-4o",
+        "o3-mini",
+        "claude-3-5-sonnet",
+        "claude-3-haiku",
+    }
 )
 
-# Speech/audio only — never used for normal chat routing
+# Chat-completion models eligible for routing / Model Controls toggles
+CHAT_MODEL_IDS: frozenset[str] = frozenset(MODEL_ALLOWLIST - {"whisper-large-v3"})
+
+# Backward-compatible aliases
+GROQ_CHAT_MODEL_IDS: frozenset[str] = CHAT_MODEL_IDS
 GROQ_AUDIO_MODEL_IDS: frozenset[str] = frozenset({"whisper-large-v3"})
+
+# Registry id → LiteLLM model string (when different from default provider prefixing)
+LITELLM_MODEL_IDS: dict[str, str] = {
+    "claude-3-5-sonnet": "claude-3-5-sonnet-20241022",
+    "claude-3-haiku": "claude-3-haiku-20240307",
+}
 
 
 class CostPer1M(TypedDict):
@@ -41,7 +56,7 @@ class CostPer1M(TypedDict):
 
 class ModelMetadata(TypedDict):
     model_name: str
-    provider: str
+    provider: ProviderName
     cost_per_1m_tokens: CostPer1M
     avg_latency_ms: int
     strengths: list[str]
@@ -54,7 +69,7 @@ class ModelMetadata(TypedDict):
 
 
 DEFAULT_METADATA: ModelMetadata = {
-    "model_name": "Unknown Groq Model",
+    "model_name": "Unknown Model",
     "provider": "groq",
     "cost_per_1m_tokens": {"input": 0.50, "output": 0.80},
     "avg_latency_ms": 800,
@@ -72,26 +87,26 @@ MODEL_REGISTRY: dict[str, ModelMetadata] = {
         "model_name": "Llama 3.1 8B Instant",
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.05, "output": 0.08},
-        "avg_latency_ms": 700,
-        "strengths": ["very fast", "cheap", "simple Q&A", "classification"],
-        "weaknesses": ["limited reasoning depth"],
+        "avg_latency_ms": 650,
+        "strengths": ["very fast", "very cheap", "simple Q&A", "classification", "prompt analysis"],
+        "weaknesses": ["limited deep reasoning", "weaker for complex coding"],
         "max_context": 131072,
-        "reasoning_score": 60,
-        "coding_score": 65,
-        "writing_score": 80,
+        "reasoning_score": 58,
+        "coding_score": 60,
+        "writing_score": 72,
         "routable": True,
     },
     "llama-3.3-70b-versatile": {
         "model_name": "Llama 3.3 70B Versatile",
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.59, "output": 0.79},
-        "avg_latency_ms": 850,
-        "strengths": ["high quality writing", "reports", "education"],
-        "weaknesses": ["slower than 8B instant"],
+        "avg_latency_ms": 1100,
+        "strengths": ["high quality writing", "reports", "education", "general reasoning"],
+        "weaknesses": ["slower and more expensive than smaller Groq models"],
         "max_context": 131072,
-        "reasoning_score": 82,
+        "reasoning_score": 84,
         "coding_score": 78,
-        "writing_score": 88,
+        "writing_score": 90,
         "routable": True,
     },
     "meta-llama/llama-4-scout-17b-16e-instruct": {
@@ -99,11 +114,11 @@ MODEL_REGISTRY: dict[str, ModelMetadata] = {
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.11, "output": 0.34},
         "avg_latency_ms": 750,
-        "strengths": ["next-gen Llama", "efficient MoE"],
-        "weaknesses": ["smaller than 70B variants"],
+        "strengths": ["efficient", "balanced", "long context", "general assistant tasks"],
+        "weaknesses": ["not best for hardest coding or reasoning tasks"],
         "max_context": 131072,
         "reasoning_score": 80,
-        "coding_score": 78,
+        "coding_score": 76,
         "writing_score": 84,
         "routable": True,
     },
@@ -112,11 +127,11 @@ MODEL_REGISTRY: dict[str, ModelMetadata] = {
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.29, "output": 0.59},
         "avg_latency_ms": 950,
-        "strengths": ["coding", "math", "structured reasoning"],
-        "weaknesses": ["may emit chain-of-thought unless suppressed"],
+        "strengths": ["coding", "math", "structured reasoning", "multilingual"],
+        "weaknesses": ["less polished for business writing"],
         "max_context": 131072,
-        "reasoning_score": 85,
-        "coding_score": 92,
+        "reasoning_score": 88,
+        "coding_score": 94,
         "writing_score": 78,
         "routable": True,
     },
@@ -125,25 +140,90 @@ MODEL_REGISTRY: dict[str, ModelMetadata] = {
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.075, "output": 0.30},
         "avg_latency_ms": 600,
-        "strengths": ["fast open-weight", "balanced"],
-        "weaknesses": ["smaller than 120B variant"],
+        "strengths": ["fast", "cheap", "balanced", "general tasks"],
+        "weaknesses": ["should not dominate complex tasks"],
         "max_context": 131072,
-        "reasoning_score": 72,
-        "coding_score": 70,
-        "writing_score": 75,
+        "reasoning_score": 70,
+        "coding_score": 68,
+        "writing_score": 72,
         "routable": True,
     },
     "openai/gpt-oss-120b": {
         "model_name": "GPT OSS 120B",
         "provider": "groq",
         "cost_per_1m_tokens": {"input": 0.15, "output": 0.60},
-        "avg_latency_ms": 1100,
-        "strengths": ["frontier open-weight", "deep reasoning"],
-        "weaknesses": ["highest latency in tier"],
+        "avg_latency_ms": 1200,
+        "strengths": ["deep reasoning", "complex analysis", "strong open-weight quality"],
+        "weaknesses": ["higher latency than smaller Groq models"],
         "max_context": 131072,
-        "reasoning_score": 90,
+        "reasoning_score": 91,
         "coding_score": 88,
-        "writing_score": 87,
+        "writing_score": 86,
+        "routable": True,
+    },
+    "gpt-4o-mini": {
+        "model_name": "GPT-4o Mini",
+        "provider": "openai",
+        "cost_per_1m_tokens": {"input": 0.15, "output": 0.60},
+        "avg_latency_ms": 1000,
+        "strengths": ["balanced quality", "general Q&A", "classification", "cheap OpenAI tier"],
+        "weaknesses": ["more expensive than Groq economy models"],
+        "max_context": 128000,
+        "reasoning_score": 82,
+        "coding_score": 82,
+        "writing_score": 84,
+        "routable": True,
+    },
+    "gpt-4o": {
+        "model_name": "GPT-4o",
+        "provider": "openai",
+        "cost_per_1m_tokens": {"input": 2.50, "output": 10.00},
+        "avg_latency_ms": 1500,
+        "strengths": ["premium quality", "multimodal", "complex reasoning", "coding", "writing"],
+        "weaknesses": ["expensive"],
+        "max_context": 128000,
+        "reasoning_score": 94,
+        "coding_score": 92,
+        "writing_score": 94,
+        "routable": True,
+    },
+    "o3-mini": {
+        "model_name": "o3-mini",
+        "provider": "openai",
+        "cost_per_1m_tokens": {"input": 1.10, "output": 4.40},
+        "avg_latency_ms": 1800,
+        "strengths": ["deep reasoning", "math", "multi-step logic", "hard coding"],
+        "weaknesses": ["slower", "not ideal for simple writing"],
+        "max_context": 200000,
+        "reasoning_score": 97,
+        "coding_score": 91,
+        "writing_score": 78,
+        "routable": True,
+    },
+    "claude-3-5-sonnet": {
+        "model_name": "Claude 3.5 Sonnet",
+        "provider": "anthropic",
+        "cost_per_1m_tokens": {"input": 3.00, "output": 15.00},
+        "avg_latency_ms": 1600,
+        "strengths": ["business writing", "RFPs", "long document analysis", "coding", "reasoning"],
+        "weaknesses": ["premium cost"],
+        "max_context": 200000,
+        "reasoning_score": 92,
+        "coding_score": 92,
+        "writing_score": 96,
+        "routable": True,
+    },
+    "claude-3-haiku": {
+        "model_name": "Claude 3 Haiku",
+        "provider": "anthropic",
+        "cost_per_1m_tokens": {"input": 0.25, "output": 1.25},
+        "avg_latency_ms": 850,
+        "strengths": ["fast Anthropic tier", "simple tasks", "summaries", "classification"],
+        "weaknesses": ["less capable than Sonnet"],
+        "max_context": 200000,
+        "reasoning_score": 73,
+        "coding_score": 72,
+        "writing_score": 80,
         "routable": True,
     },
     "whisper-large-v3": {
@@ -163,13 +243,43 @@ MODEL_REGISTRY: dict[str, ModelMetadata] = {
 
 
 def is_allowlisted_model(model_id: str) -> bool:
-    """True when model_id is in the Groq deployment allowlist."""
-    return model_id in GROQ_MODEL_ALLOWLIST
+    """True when model_id is in the deployment allowlist."""
+    return model_id in MODEL_ALLOWLIST
 
 
 def is_chat_model(model_id: str) -> bool:
     """True when model may be used for chat routing and Model Controls."""
-    return model_id in GROQ_CHAT_MODEL_IDS
+    return model_id in CHAT_MODEL_IDS
+
+
+def get_provider_for_model(model_id: str) -> str:
+    """Return provider slug for a registry model id (defaults to groq)."""
+    entry = MODEL_REGISTRY.get(model_id)
+    if entry:
+        return entry["provider"]
+    return "groq"
+
+
+def to_litellm_model(model_id: str) -> str:
+    """Convert a registry model id to the LiteLLM model string."""
+    provider = get_provider_for_model(model_id)
+    litellm_id = LITELLM_MODEL_IDS.get(model_id, model_id)
+
+    if provider == "groq":
+        if litellm_id.startswith("groq/"):
+            return litellm_id
+        return f"groq/{litellm_id}"
+    if provider == "openai":
+        return litellm_id
+    if provider == "anthropic":
+        if litellm_id.startswith("anthropic/"):
+            return litellm_id
+        return f"anthropic/{litellm_id}"
+    if provider == "google":
+        if litellm_id.startswith("gemini/"):
+            return litellm_id
+        return f"gemini/{litellm_id}"
+    return litellm_id
 
 
 def get_registry_entry(model_id: str) -> ModelMetadata | None:
@@ -181,7 +291,7 @@ def get_registry_entry(model_id: str) -> ModelMetadata | None:
 
 def get_all_registry_ids() -> list[str]:
     """All allowlisted model ids (chat + audio)."""
-    return sorted(GROQ_MODEL_ALLOWLIST)
+    return sorted(MODEL_ALLOWLIST)
 
 
 def is_routable_model(model_id: str) -> bool:

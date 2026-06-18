@@ -24,6 +24,7 @@ Render sets `$PORT` automatically — do not hardcode `8001` in production.
 3. Connect the repo; Render reads `render.yaml` at the repo root.
 4. Set secret env vars when prompted:
    - `GROQ_API_KEY`
+   - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` (optional; enables multi-provider routing)
    - `CORS_ORIGINS` (your deployed frontend URL)
    - `API_KEY_ENCRYPTION_SECRET` (recommended for user API keys)
    - Optional: `ADMIN_EMAIL`, `ADMIN_PASSWORD`
@@ -57,7 +58,10 @@ The blueprint provisions:
 | Key | Required | Notes |
 |-----|----------|-------|
 | `JWT_SECRET` | Yes | Long random string; Render can generate |
-| `GROQ_API_KEY` | No | Without it, LLM responses are mocked |
+| `GROQ_API_KEY` | No | Groq inference + classifier/enhancer; without it, LLM responses are mocked |
+| `OPENAI_API_KEY` | No | Enables OpenAI model routing (gpt-4o-mini, gpt-4o, o3-mini) |
+| `ANTHROPIC_API_KEY` | No | Enables Anthropic model routing (Claude) |
+| `GEMINI_API_KEY` | No | For Google user key testing (no Gemini chat models in catalog yet) |
 | `DATABASE_URL` | No | Default local path; use disk path on Render (below) |
 | `CORS_ORIGINS` | Yes (prod) | e.g. `https://your-frontend.onrender.com` |
 | `JWT_EXPIRE_HOURS` | No | Default `168` |
@@ -85,7 +89,10 @@ All secrets are read from `os.environ` (set in Render dashboard or `render.yaml`
 
 | Variable | Used by |
 |----------|---------|
-| `GROQ_API_KEY` | LLM calls via LiteLLM (fallback when user has no key) |
+| `GROQ_API_KEY` | Groq LLM calls, classifier, enhancer, title; Groq model sync |
+| `OPENAI_API_KEY` | OpenAI model routing via LiteLLM |
+| `ANTHROPIC_API_KEY` | Anthropic model routing via LiteLLM |
+| `GEMINI_API_KEY` | Google API key validation |
 | `JWT_SECRET` | `auth_service.py` |
 | `JWT_EXPIRE_HOURS` | Token lifetime |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Admin seed on startup |
@@ -110,7 +117,7 @@ Example response:
 {
   "status": "ok",
   "service": "TokenMaxx",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "database": { "status": "ok" },
   "groq_configured": true
 }

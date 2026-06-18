@@ -73,9 +73,28 @@ task_profiles:
   report:
     description: Reports, briefings, and long-form structured writing.
     task_match_weights:
-      coding: 0.10
-      reasoning: 0.30
+      coding: 0.05
+      reasoning: 0.35
       writing: 0.60
+    scoring_weights:
+      task: 0.42
+      reasoning: 0.28
+      writing: 0.20
+      cost: 0.05
+      speed: 0.05
+
+  business:
+    description: Strategic business, executive planning, RFPs, and enterprise analysis.
+    task_match_weights:
+      coding: 0.05
+      reasoning: 0.45
+      writing: 0.50
+    scoring_weights:
+      task: 0.45
+      reasoning: 0.25
+      writing: 0.20
+      cost: 0.05
+      speed: 0.05
 
   classification:
     description: Labeling, categorization, and tagging tasks.
@@ -96,6 +115,7 @@ task_aliases:
   creative_writing: creative
   data_analysis: research
   translation: general_qa
+  business: business
 
 # Small/fast models for non-routing Groq calls (not scored by the router)
 auxiliary:

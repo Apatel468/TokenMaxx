@@ -1,7 +1,7 @@
 # TokenMaxx — Architectural Decisions
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.5.0 · **Last updated:** June 2026  
+> **Version:** 0.6.0 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
 
 ---
@@ -14,25 +14,31 @@
 | Database | SQLite | Zero setup for MVP |
 | Vector store | ChromaDB + sentence-transformers | Local persistence; no external vector DB for MVP |
 | Auth | bcrypt + PyJWT (HS256) | Simple stateless tokens |
-| LLM gateway | LiteLLM | Unified Groq interface + `stream=True` |
+| LLM gateway | LiteLLM | Unified multi-provider interface + `stream=True` |
 | Streaming | Server-Sent Events | `POST /chat/stream`; frontend uses fetch + ReadableStream |
-| Provider | Groq only (allowlisted) | Cost/speed; controlled catalog |
+| Providers | Groq, OpenAI, Anthropic (allowlisted) | Cost/speed on Groq; premium tiers when keys configured |
 | Frontend | React + Vite | Fast iteration |
-| Tests | pytest + httpx | 59 tests; mocked LLM/stream in CI |
+| Tests | pytest + httpx | 85 tests; mocked LLM/stream in CI |
 
 ---
 
 ## Architectural Decisions
 
+### Multi-provider model allowlist (v0.6.0) 🔒
+**Decision:** Only models in `MODEL_ALLOWLIST` are synced, routed, and shown in Model Controls.  
+**Chat:** 11 models across Groq (6), OpenAI (3), Anthropic (2). **Audio:** `whisper-large-v3` only (not chat-routable).  
+**Routing:** Candidates filtered to providers with user or app API keys via `filter_candidates_by_provider_keys()`.  
+**Why:** Premium models for business/coding when warranted; economy Groq models for simple tasks.
+
 ### Groq model allowlist (v0.3.2) 🔒
-**Decision:** Only models in `GROQ_MODEL_ALLOWLIST` are synced, routed, and shown in Model Controls.  
-**Chat:** 6 models. **Audio:** `whisper-large-v3` only (not chat-routable).
+**Decision:** `GROQ_MODEL_ALLOWLIST` is a subset of `MODEL_ALLOWLIST`. Groq-hosted models optionally synced against live Groq API.  
+**Superseded by:** Multi-provider allowlist (v0.6.0) — `GROQ_MODEL_ALLOWLIST` remains for Groq sync scope.
 
 ### SSE streaming chat (v0.4.0) 🔒
 **Decision:** `POST /chat/stream` returns `text/event-stream` with events: `routing_start`, `routing_complete`, `token`, `complete`, `error`.  
 **Frontend default:** `streamChat()` in `api/chat.js`; `POST /chat` kept for sync/tests.  
 **Persistence:** Assistant message saved only after stream completes.  
-**Fallback:** Word-by-word fake stream when Groq streaming unavailable.  
+**Fallback:** Word-by-word fake stream when provider streaming unavailable.  
 **Why:** Live token display for demos; routing metadata arrives before tokens.
 
 ### Prompt Intelligence Engine v2 (v0.4.0) 🔒
@@ -52,14 +58,15 @@
 
 ### User API keys (v0.5.0) 🔒
 **Decision:** Users can store per-provider keys encrypted with Fernet (`API_KEY_ENCRYPTION_SECRET`).  
-**Resolution order (chat + regenerate):** user key → app `GROQ_API_KEY` → mock if `ALLOW_MOCK_LLM=true`.  
-**Not used for:** classifier, enhancer, title, Groq model sync (app `.env` only).  
-**Why:** BYOK for power users; app key as fallback for demos.
+**Supported providers:** groq, openai, anthropic, google, bedrock (placeholder).  
+**Resolution order (chat + regenerate):** user key → app env key → mock if `ALLOW_MOCK_LLM=true`.  
+**Not used for:** classifier, enhancer, title, Groq model sync (app `.env` Groq key only).  
+**Why:** BYOK for power users; app keys as fallback for demos.
 
 ### Activity logs (v0.5.0)
-**Decision:** Structured events in `activity_logs`; metadata sanitized (no raw keys).  
+**Decision:** Structured events in `activity_logs` via `activity_logger.py`; metadata sanitized (no raw keys).  
 **Scope:** Chat pipeline, RAG, routing, model calls, login, document upload, API key CRUD.  
-**Access:** Users see own logs; admins see all via `GET /logs/admin/logs`.  
+**Access:** Users see own logs; admins see all via `GET /admin/logs`.  
 **Why:** Debuggability and demo transparency without log aggregation infra.
 
 ### LLM task classifier (v0.3.3) 🔒
@@ -67,10 +74,11 @@
 **Note:** Classifier task types (routing) differ from enhancement task types (v2 normalization).
 
 ### Task-aware routing (v0.3.3) 🔒
-**Decision:** Complexity-aware dynamic weights + `TASK_MODEL_BONUSES` in `model_scorer.py`.
+**Decision:** Complexity-aware dynamic weights + `TASK_MODEL_BONUSES` in `model_scorer.py`.  
+**v0.6.0 extension:** Bonuses include OpenAI and Anthropic models for business, coding, and reasoning tasks.
 
 ### Client-side analytics export (v0.3.3)
-**Decision:** `tokenmaxx-analytics-report.csv` from in-memory Analytics data; no backend endpoint.
+**Decision:** `tokenmaxx-analytics-report.csv` from Analytics tab data; no dedicated export endpoint.
 
 ### On-demand model regenerate (v0.3.2) 🔒
 **Decision:** One LLM call per chip click; reuses stored prompts; **non-streaming**.
@@ -86,15 +94,15 @@ User `messages.content` = original text; `model_runs.enhanced_prompt` = clean en
 
 ---
 
-## Groq Touchpoints (with API key)
+## LLM Touchpoints (with API key)
 
 | Step | When | Model | Key source |
 |------|------|-------|------------|
-| Classify | Each chat turn | `llm_classifier` → llama-3.1-8b-instant | App `.env` |
-| Analyze + enhance | Each turn (if enabled) | Prompt Intelligence v2 | App `.env` |
+| Classify | Each chat turn | `llm_classifier` → llama-3.1-8b-instant | App `GROQ_API_KEY` |
+| Analyze + enhance | Each turn (if enabled) | Prompt Intelligence v2 | App `GROQ_API_KEY` |
 | RAG embed/search | Upload + each chat turn | sentence-transformers + ChromaDB | N/A |
-| Route + respond | Each chat turn | Scored allowlisted model (stream or sync) | User key → env → mock |
-| Title | First turn | `auxiliary.title` | App `.env` |
+| Route + respond | Each chat turn | Scored allowlisted model (any provider) | User key → env → mock |
+| Title | First turn | `auxiliary.title` | App `GROQ_API_KEY` |
 | Regenerate | User click only | User-selected model (sync) | User key → env → mock |
 
 ---

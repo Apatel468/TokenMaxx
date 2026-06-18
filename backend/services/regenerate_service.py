@@ -9,12 +9,13 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from config.model_registry import get_provider_for_model
 from database import Message, ModelRun, User
 from services.context_builder import PromptContext
 from services.conversation_store import get_conversation_or_404
 from services.cost_tracker import estimate_costs, log_request_metrics
 from services.groq_models import get_model_record, get_routable_models
-from services.activity_logger import record_activity
+from services.activity_logger import new_request_id, record_activity, with_request_meta
 from services.model_clients import MissingApiKeyError, generate_response
 from services.model_settings import get_model_disabled_reason
 
@@ -121,6 +122,9 @@ def regenerate_with_model(
         db, conversation_id, message_id
     )
 
+    request_id = new_request_id()
+    prompt_preview = (_user_msg.content or "").strip()[:120]
+
     record_activity(
         db,
         user_id=user.id,
@@ -128,7 +132,11 @@ def regenerate_with_model(
         message="Regeneration started.",
         conversation_id=conversation_id,
         message_id=message_id,
-        metadata={"model": model_id},
+        metadata=with_request_meta(
+            request_id=request_id,
+            model=model_id,
+            prompt_preview=prompt_preview,
+        ),
     )
 
     try:
@@ -148,7 +156,11 @@ def regenerate_with_model(
             message=str(exc),
             conversation_id=conversation_id,
             message_id=message_id,
-            metadata={"model": model_id, "provider": exc.provider},
+            metadata=with_request_meta(
+                request_id=request_id,
+                model=model_id,
+                provider=exc.provider,
+            ),
         )
         db.commit()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -166,12 +178,15 @@ def regenerate_with_model(
     db.flush()
 
     savings_usd = costs.premium_cost - costs.actual_cost
+    model_record = get_model_record(model_id)
+    provider = model_record.provider if model_record else get_provider_for_model(model_id)
     model_run = ModelRun(
         conversation_id=conversation_id,
         user_id=user.id,
         assistant_message_id=assistant_message.id,
         task_type=context.task_type,
         selected_model=model_id,
+        provider=provider,
         reason_selected=f"User-selected regeneration from {first_run.selected_model}",
         input_tokens=costs.input_tokens,
         output_tokens=costs.output_tokens,
@@ -200,19 +215,19 @@ def regenerate_with_model(
         message="Regeneration completed.",
         conversation_id=conversation_id,
         message_id=message_id,
-        metadata={
-            "model": model_id,
-            "latency_ms": model_response.latency_ms,
-            "input_tokens": costs.input_tokens,
-            "output_tokens": costs.output_tokens,
-        },
+        metadata=with_request_meta(
+            request_id=request_id,
+            model=model_id,
+            provider=provider,
+            latency_ms=model_response.latency_ms,
+            input_tokens=costs.input_tokens,
+            output_tokens=costs.output_tokens,
+        ),
     )
     db.commit()
     db.refresh(assistant_message)
 
-    record = get_model_record(model_id)
-    model_label = record.model_name if record else model_id
-    provider = record.provider if record else "groq"
+    model_label = model_record.model_name if model_record else model_id
     regeneration_reason = (
         f"User manually regenerated this response with {model_label}."
     )

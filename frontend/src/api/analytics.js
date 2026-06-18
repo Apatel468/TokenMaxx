@@ -17,3 +17,8 @@ export function fetchHistory(limit = 20) {
 export function fetchModelUsage() {
   return authFetch("/analytics/model-usage");
 }
+
+/** GET /analytics/provider-usage — per-provider breakdown */
+export function fetchProviderUsage() {
+  return authFetch("/analytics/provider-usage");
+}

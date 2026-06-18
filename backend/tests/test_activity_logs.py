@@ -33,6 +33,30 @@ def test_chat_creates_activity_logs(client, auth_token, test_db):
     assert "rag_search_started" in event_types
 
 
+def test_chat_logs_share_request_id(client, auth_token, test_db):
+    client.post(
+        "/chat",
+        json={"prompt": "Grouped logs test", "enhance_prompt": True},
+        headers=auth_headers(auth_token),
+    )
+    rows = test_db.query(ActivityLog).all()
+    pipeline = [
+        row for row in rows
+        if row.event_type in {
+            "chat_request_received",
+            "prompt_enhancement_started",
+            "routing_completed",
+            "model_call_completed",
+        }
+    ]
+    request_ids = {
+        json.loads(row.metadata_json or "{}").get("request_id")
+        for row in pipeline
+    }
+    request_ids.discard(None)
+    assert len(request_ids) == 1
+
+
 def test_document_upload_creates_activity_logs(client, auth_token, test_db):
     upload = client.post(
         "/documents/upload",

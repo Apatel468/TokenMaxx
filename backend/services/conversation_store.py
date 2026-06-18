@@ -327,6 +327,7 @@ def save_chat_turn(
         assistant_message_id=assistant_message.id,
         task_type=task_type,
         selected_model=decision.model_id,
+        provider=decision.provider,
         reason_selected=decision.reason,
         input_tokens=costs.input_tokens,
         output_tokens=costs.output_tokens,

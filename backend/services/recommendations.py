@@ -61,6 +61,7 @@ def build_top_recommendations(
                 "estimated_latency": _estimate_latency(model_id),
                 "available": available,
                 "disabled_reason": disabled_reason or "",
+                "provider_key_available": bool(candidate.get("provider_key_available", True)),
             }
         )
 

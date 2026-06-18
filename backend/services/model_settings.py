@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from config.model_registry import (
-    GROQ_CHAT_MODEL_IDS,
+    CHAT_MODEL_IDS,
     cost_per_1k_tokens,
     tier_for_model,
 )
@@ -41,7 +41,7 @@ def cleanup_stale_model_settings(db: Session) -> int:
 
     Historical model_runs with old model ids are untouched for analytics.
     """
-    allowed = set(GROQ_CHAT_MODEL_IDS)
+    allowed = set(CHAT_MODEL_IDS)
     removed = 0
     for row in db.query(AdminModelSetting).all():
         if row.model_id not in allowed:

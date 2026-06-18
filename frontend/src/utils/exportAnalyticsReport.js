@@ -18,6 +18,13 @@ function formatCostPlain(value) {
   return Number(value).toFixed(6);
 }
 
+function totalTokens(input, output) {
+  const inputVal = Number(input) || 0;
+  const outputVal = Number(output) || 0;
+  if (inputVal === 0 && outputVal === 0) return "N/A";
+  return String(inputVal + outputVal);
+}
+
 /**
  * @param {object} summary — GET /analytics/summary
  * @param {Array} modelUsage — GET /analytics/model-usage
@@ -43,6 +50,10 @@ export function buildAnalyticsCsv(summary, modelUsage, history) {
   lines.push(
     csvRow(["Savings Percentage", `${summary.savings_percentage.toFixed(1)}%`])
   );
+  lines.push(csvRow(["Total Tokens", summary.total_tokens ?? 0]));
+  lines.push(
+    csvRow(["Avg Tokens / Request", summary.avg_tokens_per_request ?? 0])
+  );
   lines.push("");
 
   lines.push("Model Usage Breakdown");
@@ -52,6 +63,8 @@ export function buildAnalyticsCsv(summary, modelUsage, history) {
       "Runs",
       "Share %",
       "Total Cost",
+      "Total Tokens",
+      "Avg Tokens / Request",
       "Average Latency (ms)",
     ])
   );
@@ -66,6 +79,8 @@ export function buildAnalyticsCsv(summary, modelUsage, history) {
         row.run_count,
         share,
         formatCostPlain(row.total_cost),
+        row.total_tokens ?? 0,
+        row.avg_tokens_per_request ?? 0,
         row.average_latency_ms.toFixed(0),
       ])
     );
@@ -84,6 +99,9 @@ export function buildAnalyticsCsv(summary, modelUsage, history) {
       "Actual Cost",
       "Premium Cost",
       "Savings %",
+      "Input Tokens",
+      "Output Tokens",
+      "Total Tokens",
     ])
   );
   for (const row of history) {
@@ -98,6 +116,9 @@ export function buildAnalyticsCsv(summary, modelUsage, history) {
         formatCostPlain(row.actual_cost),
         formatCostPlain(row.premium_cost),
         row.savings_percentage.toFixed(1),
+        row.input_tokens ?? 0,
+        row.output_tokens ?? 0,
+        totalTokens(row.input_tokens, row.output_tokens),
       ])
     );
   }

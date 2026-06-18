@@ -4,6 +4,7 @@ User API keys router — CRUD and test for per-user LLM provider keys.
 
 from __future__ import annotations
 
+import logging
 from datetime import timezone
 
 from fastapi import APIRouter, Depends, status
@@ -30,6 +31,7 @@ from services.api_key_service import (
 from services.auth_dependencies import get_current_user
 
 router = APIRouter(prefix="/user/api-keys", tags=["user-api-keys"])
+logger = logging.getLogger(__name__)
 
 
 def _format_dt(dt) -> str:
@@ -76,15 +78,22 @@ def add_api_key(
         api_key=body.api_key,
         key_label=body.key_label,
         is_active=body.is_active,
+        commit=False,
     )
     record_activity(
         db,
         user_id=current_user.id,
         event_type="api_key_added",
         message=f"API key added for provider {provider}.",
-        metadata={"provider": provider, "key_label": row.key_label},
+        metadata={"provider": provider},
     )
     db.commit()
+    db.refresh(row)
+    logger.info(
+        "api_key_added | user_id=%s | provider=%s",
+        current_user.id,
+        provider,
+    )
     return _to_out(row)
 
 

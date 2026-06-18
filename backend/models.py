@@ -73,6 +73,58 @@ class EmployeeUsageRecord(BaseModel):
     most_used_models: list[str]
 
 
+class PromptPeriodCount(BaseModel):
+    period: str
+    count: int
+
+
+class ModelUsageCount(BaseModel):
+    model: str
+    run_count: int
+
+
+class ModelLatencyMetric(BaseModel):
+    model: str
+    run_count: int
+    average_latency_ms: float
+
+
+class FeatureUsageCount(BaseModel):
+    feature: str
+    count: int
+
+
+class CategoryCount(BaseModel):
+    category: str
+    count: int
+
+
+class AdminUserMetricsRecord(BaseModel):
+    """Per-user admin metrics for GET /admin/user-metrics."""
+
+    user_id: int
+    email: str
+    role: str
+    total_prompts: int
+    prompts_over_time: list[PromptPeriodCount] = Field(default_factory=list)
+    session_count: int = 0
+    average_prompts_per_session: float = 0.0
+    most_used_models: list[ModelUsageCount] = Field(default_factory=list)
+    average_latency_by_model: list[ModelLatencyMetric] = Field(default_factory=list)
+    feature_usage: list[FeatureUsageCount] = Field(default_factory=list)
+    query_categories: list[CategoryCount] = Field(default_factory=list)
+    total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_actual_cost: float = 0.0
+    total_premium_cost: float = 0.0
+    total_savings: float = 0.0
+    savings_percentage: float = 0.0
+    top_model: str = ""
+    top_category: str = ""
+    average_latency_ms: float = 0.0
+
+
 # ---------------------------------------------------------------------------
 # Chat endpoint models
 # ---------------------------------------------------------------------------
@@ -205,6 +257,14 @@ class ChatResponse(BaseModel):
     estimated_savings_percentage: float = Field(
         description="How much cheaper the chosen model was vs. premium (0-100)."
     )
+    input_tokens: int = Field(
+        default=0,
+        description="Input tokens for this chat turn.",
+    )
+    output_tokens: int = Field(
+        default=0,
+        description="Output tokens for this chat turn.",
+    )
     preferred_model: str = Field(
         default="",
         description="Model that would have been chosen before enable/disable rules.",
@@ -227,7 +287,27 @@ class ChatResponse(BaseModel):
     )
     top_candidate_scores: list[dict] = Field(
         default_factory=list,
-        description="Top 3 routing scores for the Latest Routing debug panel.",
+        description="Top routing scores for the Latest Routing debug panel.",
+    )
+    complexity_score: float = Field(
+        default=0.0,
+        description="Estimated prompt complexity from 0.0 to 1.0.",
+    )
+    complexity_level: str = Field(
+        default="low",
+        description="Human-readable complexity band: low, medium, or high.",
+    )
+    task_profile_key: str = Field(
+        default="",
+        description="Resolved task profile key used for scoring weights.",
+    )
+    provider_availability: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Whether each provider has a configured API key.",
+    )
+    routing_explanation: list[str] = Field(
+        default_factory=list,
+        description="Bullet points explaining why the model was selected.",
     )
     top_recommendations: list[ModelRecommendation] = Field(
         default_factory=list,
@@ -328,6 +408,10 @@ class AnalyticsSummary(BaseModel):
     premium_baseline_cost: float
     total_savings: float
     savings_percentage: float
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    avg_tokens_per_request: float = 0.0
     enhancement_enabled_count: int = 0
     enhancement_disabled_count: int = 0
     enhancement_cost_saved: float = 0.0
@@ -346,6 +430,8 @@ class HistoryRecord(BaseModel):
     actual_cost: float
     premium_cost: float
     savings_percentage: float
+    input_tokens: int = 0
+    output_tokens: int = 0
     enhancement_enabled: bool = True
     enhancement_method: str = ""
     timestamp: str = Field(
@@ -375,14 +461,30 @@ class ConversationRecord(BaseModel):
 
 
 class ModelUsageRecord(BaseModel):
-    """Usage stats grouped by Groq model."""
+    """Usage stats grouped by model."""
 
     model: str
+    provider: str = "groq"
     run_count: int
     total_input_tokens: int
     total_output_tokens: int
+    total_tokens: int = 0
+    avg_tokens_per_request: float = 0.0
     total_cost: float
     average_latency_ms: float
+
+
+class ProviderUsageRecord(BaseModel):
+    """Usage stats grouped by LLM provider."""
+
+    provider: str
+    run_count: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_tokens: int = 0
+    total_cost: float
+    average_latency_ms: float
+    model_count: int = 0
 
 
 # ---------------------------------------------------------------------------

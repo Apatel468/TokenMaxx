@@ -9,6 +9,7 @@ from collections import Counter
 
 from sqlalchemy.orm import Session
 
+from config.model_registry import get_provider_for_model
 from database import Message, ModelRun, User
 from models import (
     AnalyticsSummary,
@@ -16,6 +17,7 @@ from models import (
     EmployeeUsageRecord,
     HistoryRecord,
     ModelUsageRecord,
+    ProviderUsageRecord,
 )
 from services.timezone_utils import format_timestamp_eastern
 
@@ -40,6 +42,10 @@ def generate_analytics_summary(db: Session, user_id: int) -> AnalyticsSummary:
             premium_baseline_cost=0.0,
             total_savings=0.0,
             savings_percentage=0.0,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_tokens=0,
+            avg_tokens_per_request=0.0,
             enhancement_enabled_count=0,
             enhancement_disabled_count=0,
             enhancement_cost_saved=0.0,
@@ -62,12 +68,23 @@ def generate_analytics_summary(db: Session, user_id: int) -> AnalyticsSummary:
     )
     regeneration_count = sum(1 for r in runs if getattr(r, "is_regeneration", False))
 
+    total_input_tokens = sum(r.input_tokens for r in runs)
+    total_output_tokens = sum(r.output_tokens for r in runs)
+    total_tokens = total_input_tokens + total_output_tokens
+    avg_tokens_per_request = (
+        total_tokens / len(runs) if runs else 0.0
+    )
+
     return AnalyticsSummary(
         total_chats=len(runs),
         total_cost=round(total_cost, 6),
         premium_baseline_cost=round(premium_baseline_cost, 6),
         total_savings=round(total_savings, 6),
         savings_percentage=round(savings_percentage, 2),
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        total_tokens=total_tokens,
+        avg_tokens_per_request=round(avg_tokens_per_request, 1),
         enhancement_enabled_count=enabled_count,
         enhancement_disabled_count=disabled_count,
         enhancement_cost_saved=round(enhancement_cost_saved, 6),
@@ -169,6 +186,8 @@ def get_history(db: Session, user_id: int, limit: int = 20) -> list[HistoryRecor
                 actual_cost=run.estimated_cost,
                 premium_cost=run.premium_model_cost,
                 savings_percentage=run.savings_percentage,
+                input_tokens=run.input_tokens,
+                output_tokens=run.output_tokens,
                 enhancement_enabled=bool(getattr(run, "enhancement_enabled", True)),
                 enhancement_method=run.enhancement_method or "",
                 timestamp=format_timestamp_eastern(run.created_at),
@@ -176,6 +195,13 @@ def get_history(db: Session, user_id: int, limit: int = 20) -> list[HistoryRecor
         )
 
     return results
+
+
+def _run_provider(run) -> str:
+    """Resolve provider for a model run (column or registry lookup)."""
+    if getattr(run, "provider", None):
+        return run.provider
+    return get_provider_for_model(run.selected_model)
 
 
 def get_model_usage(db: Session, user_id: int) -> list[ModelUsageRecord]:
@@ -191,6 +217,7 @@ def get_model_usage(db: Session, user_id: int) -> list[ModelUsageRecord]:
                 "output_tokens": 0,
                 "total_cost": 0.0,
                 "latency_sum": 0.0,
+                "provider": _run_provider(run),
             }
         bucket = stats[run.selected_model]
         bucket["run_count"] += 1
@@ -207,11 +234,66 @@ def get_model_usage(db: Session, user_id: int) -> list[ModelUsageRecord]:
         results.append(
             ModelUsageRecord(
                 model=model,
+                provider=data["provider"],
                 run_count=data["run_count"],
                 total_input_tokens=data["input_tokens"],
                 total_output_tokens=data["output_tokens"],
+                total_tokens=data["input_tokens"] + data["output_tokens"],
+                avg_tokens_per_request=round(
+                    (data["input_tokens"] + data["output_tokens"]) / data["run_count"],
+                    1,
+                )
+                if data["run_count"]
+                else 0.0,
                 total_cost=round(data["total_cost"], 6),
                 average_latency_ms=round(avg_latency, 1),
+            )
+        )
+
+    return results
+
+
+def get_provider_usage(db: Session, user_id: int) -> list[ProviderUsageRecord]:
+    """Aggregate usage stats grouped by provider for one user."""
+    runs = _runs_for_user(db, user_id).all()
+
+    stats: dict[str, dict] = {}
+    models_per_provider: dict[str, set[str]] = {}
+
+    for run in runs:
+        provider = _run_provider(run)
+        if provider not in stats:
+            stats[provider] = {
+                "run_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_cost": 0.0,
+                "latency_sum": 0.0,
+            }
+            models_per_provider[provider] = set()
+        bucket = stats[provider]
+        bucket["run_count"] += 1
+        bucket["input_tokens"] += run.input_tokens
+        bucket["output_tokens"] += run.output_tokens
+        bucket["total_cost"] += run.estimated_cost
+        bucket["latency_sum"] += run.latency_ms
+        models_per_provider[provider].add(run.selected_model)
+
+    results = []
+    for provider, data in sorted(stats.items()):
+        avg_latency = (
+            data["latency_sum"] / data["run_count"] if data["run_count"] else 0
+        )
+        results.append(
+            ProviderUsageRecord(
+                provider=provider,
+                run_count=data["run_count"],
+                total_input_tokens=data["input_tokens"],
+                total_output_tokens=data["output_tokens"],
+                total_tokens=data["input_tokens"] + data["output_tokens"],
+                total_cost=round(data["total_cost"], 6),
+                average_latency_ms=round(avg_latency, 1),
+                model_count=len(models_per_provider.get(provider, set())),
             )
         )
 

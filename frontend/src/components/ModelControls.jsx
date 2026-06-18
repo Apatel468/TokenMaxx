@@ -17,6 +17,16 @@ function tierLabel(tier) {
   return tier;
 }
 
+function providerLabel(provider) {
+  const labels = {
+    groq: "Groq",
+    openai: "OpenAI",
+    anthropic: "Anthropic",
+    google: "Google",
+  };
+  return labels[provider] || provider;
+}
+
 function ModelControls({
   isAdmin = false,
   enhancePrompts = true,
@@ -191,13 +201,18 @@ function ModelControls({
                   <div className="model-control-card__info">
                     <div className="model-control-card__top">
                       <h3 className="model-control-card__name">{model.name}</h3>
-                      <span className={`tier-badge tier-badge--${model.tier}`}>
-                        {tierLabel(model.tier)}
-                      </span>
+                      <div className="model-control-card__badges">
+                        <span
+                          className={`provider-badge provider-badge--${model.provider}`}
+                        >
+                          {providerLabel(model.provider)}
+                        </span>
+                        <span className={`tier-badge tier-badge--${model.tier}`}>
+                          {tierLabel(model.tier)}
+                        </span>
+                      </div>
                     </div>
                     <p className="model-control-card__meta">
-                      <span>{model.provider}</span>
-                      <span>·</span>
                       <span>{model.model_id}</span>
                     </p>
                     <p className="model-control-card__tasks">

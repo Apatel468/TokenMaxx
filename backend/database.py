@@ -37,6 +37,20 @@ def get_database_url() -> str:
     return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL).strip() or DEFAULT_DATABASE_URL
 
 
+def get_sqlite_database_path() -> str | None:
+    """Absolute path for file-based SQLite URLs; None for in-memory or non-SQLite."""
+    url = get_database_url()
+    if not url.startswith("sqlite:///"):
+        return None
+    raw_path = url.removeprefix("sqlite:///")
+    if raw_path == ":memory:":
+        return None
+    db_path = Path(raw_path)
+    if not db_path.is_absolute():
+        db_path = Path.cwd() / db_path
+    return str(db_path.resolve())
+
+
 def _ensure_sqlite_parent_exists(url: str) -> None:
     """Create parent directories for file-based SQLite paths when needed."""
     if not url.startswith("sqlite:///"):
@@ -239,6 +253,7 @@ class ModelRun(Base):
     # Routing
     task_type = Column(String(50), nullable=False)
     selected_model = Column(String(100), nullable=False)
+    provider = Column(String(30), nullable=False, default="groq", index=True)
     reason_selected = Column(Text, nullable=False)
 
     # Token usage
@@ -406,6 +421,7 @@ def init_db() -> None:
     _migrate_prompt_intelligence_columns()
     _migrate_rag_columns()
     _migrate_api_keys_and_logs_tables()
+    _migrate_model_runs_provider_column()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -627,6 +643,20 @@ def _migrate_rag_columns() -> None:
                 conn.commit()
             except OperationalError:
                 conn.rollback()
+
+
+def _migrate_model_runs_provider_column() -> None:
+    """Add provider column to model_runs for multi-provider analytics."""
+    with engine.connect() as conn:
+        if _table_has_column(conn, "model_runs", "provider"):
+            return
+        try:
+            conn.execute(
+                text("ALTER TABLE model_runs ADD COLUMN provider VARCHAR(30) DEFAULT 'groq'")
+            )
+            conn.commit()
+        except OperationalError:
+            conn.rollback()
 
 
 def _migrate_model_runs_columns() -> None:

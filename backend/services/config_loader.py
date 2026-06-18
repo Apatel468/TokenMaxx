@@ -43,6 +43,31 @@ def get_task_profile(task_type: str) -> dict:
     return profiles.get(key, profiles.get(config.get("default_task", "general_qa"), {}))
 
 
+def get_scoring_weights(task_type: str, complexity: float) -> dict[str, float]:
+    """
+    Return composite score weights for a task.
+
+    Business/report profiles use fixed quality-first weights; other tasks shift
+    with prompt complexity (cheap models win simple prompts).
+    """
+    profile = get_task_profile(task_type)
+    custom = profile.get("scoring_weights")
+    if custom:
+        return {
+            "task": float(custom.get("task", 0.45)),
+            "reasoning": float(custom.get("reasoning", 0.25)),
+            "writing": float(custom.get("writing", 0.20)),
+            "cost": float(custom.get("cost", 0.05)),
+            "speed": float(custom.get("speed", 0.05)),
+        }
+
+    if complexity < 0.35:
+        return {"task": 0.42, "reasoning": 0.12, "writing": 0.0, "cost": 0.12, "speed": 0.16}
+    if complexity > 0.65:
+        return {"task": 0.50, "reasoning": 0.30, "writing": 0.0, "cost": 0.04, "speed": 0.08}
+    return {"task": 0.46, "reasoning": 0.22, "writing": 0.0, "cost": 0.08, "speed": 0.12}
+
+
 def get_auxiliary_model(role: str) -> str:
     """
     Return a small Groq model id for non-routing calls.

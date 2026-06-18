@@ -26,7 +26,7 @@ def test_coding_prompt_prefers_qwen():
     assert winner == "qwen/qwen3-32b"
 
 
-def test_report_prompt_prefers_large_writing_model():
+def test_report_prompt_prefers_quality_writing_model():
     winner = _winner(
         "report",
         "Write a professional business report on Q3 revenue trends for executives.",
@@ -34,15 +34,22 @@ def test_report_prompt_prefers_large_writing_model():
     assert winner in {
         "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
+        "claude-3-5-sonnet",
+        "gpt-4o",
     }
 
 
-def test_complex_reasoning_prefers_gpt_oss_120b():
+def test_complex_reasoning_prefers_high_reasoning_model():
     winner = _winner(
         "reasoning",
         "Solve this complex logic puzzle step by step and prove your answer.",
     )
-    assert winner == "openai/gpt-oss-120b"
+    assert winner in {
+        "openai/gpt-oss-120b",
+        "o3-mini",
+        "gpt-4o",
+        "claude-3-5-sonnet",
+    }
 
 
 def test_summarization_does_not_default_to_gpt_oss_20b():

@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from database import ActivityLog, User, get_db
-from models import ActivityLogOut, EmployeeUsageRecord
+from models import ActivityLogOut, AdminUserMetricsRecord, EmployeeUsageRecord
 from routers.logs import _to_log_out
 from services.activity_logger import fetch_activity_logs
+from services.admin_user_metrics import get_admin_user_metrics
 from services.auth_dependencies import require_admin
 from services.report_generator import get_employee_usage_metrics
 
@@ -22,6 +23,25 @@ def employee_usage(
 ) -> list[EmployeeUsageRecord]:
     """Per-user chat cost and model breakdown (admin only)."""
     return get_employee_usage_metrics(db)
+
+
+@router.get("/user-metrics", response_model=list[AdminUserMetricsRecord])
+def user_metrics(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    user_id: int | None = None,
+    granularity: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+) -> list[AdminUserMetricsRecord]:
+    """Per-user usage metrics with prompts, models, features, and categories."""
+    return get_admin_user_metrics(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        user_id=user_id,
+        granularity=granularity,
+    )
 
 
 @router.get("/logs", response_model=list[ActivityLogOut])

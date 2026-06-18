@@ -19,6 +19,7 @@ import { regenerateChat, streamChat } from "../api/chat.js";
 import { fetchConversation, fetchConversations } from "../api/conversations.js";
 
 import PromptEnhancementViewer from "./PromptEnhancementViewer.jsx";
+import { CostMetricCard, SavingsMetricCard } from "./CostMetricDisplay.jsx";
 
 import { resolveChatTitle, resolveSidebarTitle } from "../utils/conversationTitle.js";
 
@@ -35,6 +36,8 @@ function applyRegenerateToRoutingResult(previousResult, regenData) {
     estimated_actual_cost: regenData.actual_cost,
     estimated_premium_cost: regenData.premium_cost,
     estimated_savings_percentage: regenData.savings_percentage,
+    input_tokens: regenData.input_tokens,
+    output_tokens: regenData.output_tokens,
     was_user_selected: regenData.was_user_selected !== false,
     used_fallback: false,
     fallback_message: "",
@@ -669,7 +672,59 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
                     )}
 
+                    {result.complexity_level && !result.was_user_selected && (
+                      <div className="stat-card">
+                        <span className="stat-card__label">Complexity</span>
+                        <span className="stat-card__value">
+                          {result.complexity_level}
+                          {result.complexity_score > 0 && (
+                            <span className="stat-card__sub">
+                              {" "}
+                              ({Number(result.complexity_score).toFixed(2)})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+
                   </div>
+
+                  {result.provider_availability &&
+                    Object.keys(result.provider_availability).length > 0 && (
+                      <div className="routing-providers">
+                        <span className="routing-candidates__label">
+                          Provider keys
+                        </span>
+                        <div className="routing-providers__chips">
+                          {Object.entries(result.provider_availability).map(
+                            ([provider, available]) => (
+                              <span
+                                key={provider}
+                                className={`provider-badge provider-badge--${provider} ${
+                                  available ? "" : "provider-badge--unavailable"
+                                }`}
+                              >
+                                {provider}
+                                {available ? " ✓" : " — no key"}
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                  {result.routing_explanation?.length > 0 && (
+                    <div className="routing-explanation">
+                      <span className="routing-candidates__label">
+                        Why this model
+                      </span>
+                      <ul className="routing-explanation__list">
+                        {result.routing_explanation.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {result.top_candidate_scores?.length > 0 && (
                     <div className="routing-candidates">
@@ -691,6 +746,12 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                             </span>
                             <span className="routing-candidates__id">
                               {candidate.model_id}
+                              {candidate.provider && (
+                                <span className="routing-candidates__provider">
+                                  {" "}
+                                  · {candidate.provider}
+                                </span>
+                              )}
                             </span>
                             <span className="routing-candidates__score">
                               {Number(candidate.score).toFixed(1)}
@@ -830,41 +891,30 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
                   <div className="cost-row">
 
-                    <div className="cost-card">
+                    <CostMetricCard
+                      label="Actual"
+                      cost={result.estimated_actual_cost}
+                      inputTokens={result.input_tokens}
+                      outputTokens={result.output_tokens}
+                    />
 
-                      <span className="cost-card__label">Actual</span>
+                    <CostMetricCard
+                      label="Premium Equivalent"
+                      cost={result.estimated_premium_cost}
+                      inputTokens={result.input_tokens}
+                      outputTokens={result.output_tokens}
+                      variant="cost-card--premium"
+                    />
 
-                      <span className="cost-card__value">
-
-                        ${result.estimated_actual_cost.toFixed(6)}
-
-                      </span>
-
-                    </div>
-
-                    <div className="cost-card cost-card--premium">
-
-                      <span className="cost-card__label">Premium</span>
-
-                      <span className="cost-card__value">
-
-                        ${result.estimated_premium_cost.toFixed(6)}
-
-                      </span>
-
-                    </div>
-
-                    <div className="cost-card cost-card--savings">
-
-                      <span className="cost-card__label">Saved</span>
-
-                      <span className="cost-card__value cost-card__value--savings">
-
-                        {result.estimated_savings_percentage.toFixed(1)}%
-
-                      </span>
-
-                    </div>
+                    <SavingsMetricCard
+                      label="Saved"
+                      actualCost={result.estimated_actual_cost}
+                      premiumCost={result.estimated_premium_cost}
+                      savingsPercentage={result.estimated_savings_percentage}
+                      inputTokens={result.input_tokens}
+                      outputTokens={result.output_tokens}
+                      compact
+                    />
 
                   </div>
 

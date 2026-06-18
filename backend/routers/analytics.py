@@ -9,12 +9,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from database import User, get_db
-from models import AnalyticsSummary, HistoryRecord, ModelUsageRecord
+from models import AnalyticsSummary, HistoryRecord, ModelUsageRecord, ProviderUsageRecord
 from services.auth_dependencies import get_current_user
 from services.report_generator import (
     generate_analytics_summary,
     get_history,
     get_model_usage,
+    get_provider_usage,
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -46,3 +47,12 @@ def model_usage(
 ) -> list[ModelUsageRecord]:
     """Return how often each model was used and total cost per model."""
     return get_model_usage(db, current_user.id)
+
+
+@router.get("/provider-usage", response_model=list[ProviderUsageRecord])
+def provider_usage(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ProviderUsageRecord]:
+    """Return usage breakdown grouped by LLM provider."""
+    return get_provider_usage(db, current_user.id)

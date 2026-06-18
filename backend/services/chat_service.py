@@ -24,7 +24,7 @@ from services.prompt_analyzer import AnalysisResult, analyze_prompt
 from services.prompt_intelligence import PromptAnalysis
 from services.prompt_enhancer import format_enhanced_prompt_for_display
 from services.recommendations import build_top_recommendations
-from services.activity_logger import record_activity
+from services.activity_logger import record_activity, with_request_meta
 from services.rag_service import apply_rag_to_context, rag_metadata_dict, retrieve_for_chat
 from services.router_engine import RoutingDecision, route
 from services.context_builder import PromptContext
@@ -52,6 +52,8 @@ def prepare_chat_turn(
     db: Session,
     user: User,
     request: ChatRequest,
+    *,
+    request_id: str | None = None,
 ) -> tuple[AnalysisResult, PromptContext, RoutingDecision, float, list[dict]]:
     """Classify, enhance, and route — shared by sync and streaming chat."""
     prior_messages: list[dict] = []
@@ -66,7 +68,7 @@ def prepare_chat_turn(
             event_type="prompt_enhancement_started",
             message="Prompt enhancement started.",
             conversation_id=request.conversation_id,
-            metadata={"enhance_prompt": True},
+            metadata=with_request_meta(request_id=request_id, enhance_prompt=True),
         )
 
     analysis = analyze_prompt(request.prompt)
@@ -84,10 +86,11 @@ def prepare_chat_turn(
             event_type="prompt_enhancement_completed",
             message="Prompt enhancement completed.",
             conversation_id=request.conversation_id,
-            metadata={
-                "task_type": context.task_type,
-                "enhancement_method": context.enhancement_method,
-            },
+            metadata=with_request_meta(
+                request_id=request_id,
+                task_type=context.task_type,
+                enhancement_method=context.enhancement_method,
+            ),
         )
 
     record_activity(
@@ -96,6 +99,7 @@ def prepare_chat_turn(
         event_type="rag_search_started",
         message="RAG document search started.",
         conversation_id=request.conversation_id,
+        metadata=with_request_meta(request_id=request_id),
     )
     rag_result = retrieve_for_chat(user.id, request.prompt)
     context = apply_rag_to_context(context, rag_result)
@@ -105,11 +109,12 @@ def prepare_chat_turn(
         event_type="rag_chunks_retrieved",
         message="RAG document search completed.",
         conversation_id=request.conversation_id,
-        metadata={
-            "rag_used": rag_result.rag_used,
-            "chunk_count": rag_result.retrieved_chunk_count,
-            "source_filenames": rag_result.source_filenames,
-        },
+        metadata=with_request_meta(
+            request_id=request_id,
+            rag_used=rag_result.rag_used,
+            chunk_count=rag_result.retrieved_chunk_count,
+            source_filenames=rag_result.source_filenames,
+        ),
     )
 
     enhancement_cost_saved = (
@@ -124,7 +129,7 @@ def prepare_chat_turn(
         event_type="routing_started",
         message="Model routing started.",
         conversation_id=request.conversation_id,
-        metadata={"task_type": context.task_type},
+        metadata=with_request_meta(request_id=request_id, task_type=context.task_type),
     )
     decision = route(context, db, user.id)
     record_activity(
@@ -133,12 +138,13 @@ def prepare_chat_turn(
         event_type="routing_completed",
         message="Model routing completed.",
         conversation_id=request.conversation_id,
-        metadata={
-            "task_type": context.task_type,
-            "model": decision.model_id,
-            "provider": "groq",
-            "routing_score": decision.score,
-        },
+        metadata=with_request_meta(
+            request_id=request_id,
+            task_type=context.task_type,
+            model=decision.model_id,
+            provider=decision.provider,
+            routing_score=decision.score,
+        ),
     )
     return analysis, context, decision, enhancement_cost_saved, prior_messages
 
@@ -219,8 +225,13 @@ def build_routing_metadata(
         "fallback_message": decision.fallback_message,
         "routing_score": decision.score,
         "candidate_models": decision.candidate_models,
-        "top_candidate_scores": decision.candidate_models[:3],
+        "top_candidate_scores": decision.candidate_models[:5],
         "top_recommendations": top_recs,
+        "complexity_score": decision.complexity_score,
+        "complexity_level": decision.complexity_level,
+        "task_profile_key": decision.task_profile_key,
+        "provider_availability": decision.provider_availability,
+        "routing_explanation": decision.routing_explanation,
         "prompt_analysis": prompt_analysis_to_out(context.prompt_analysis),
         **rag_metadata_dict(context),
     }
@@ -267,12 +278,19 @@ def build_chat_response(
         estimated_actual_cost=costs.actual_cost,
         estimated_premium_cost=costs.premium_cost,
         estimated_savings_percentage=costs.savings_percentage,
+        input_tokens=costs.input_tokens,
+        output_tokens=costs.output_tokens,
         preferred_model=decision.preferred_model_id,
         used_fallback=decision.used_fallback,
         fallback_message=decision.fallback_message,
         routing_score=decision.score,
         candidate_models=decision.candidate_models,
-        top_candidate_scores=decision.candidate_models[:3],
+        top_candidate_scores=decision.candidate_models[:5],
+        complexity_score=decision.complexity_score,
+        complexity_level=decision.complexity_level,
+        task_profile_key=decision.task_profile_key,
+        provider_availability=decision.provider_availability,
+        routing_explanation=decision.routing_explanation,
         top_recommendations=[ModelRecommendation(**r) for r in top_recs],
         user_message_id=user_message_id,
         assistant_message_id=assistant_message_id,

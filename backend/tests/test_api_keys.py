@@ -18,6 +18,39 @@ def _signup(client, email: str) -> str:
     return response.json()["access_token"]
 
 
+def test_post_api_keys_persists_row_and_get_masks(client, auth_token, test_db):
+    """POST must create a DB row; GET must return masked metadata only."""
+    plain_key = "sk-proj-persist-test-key-abcdef"
+    response = client.post(
+        "/user/api-keys",
+        json={
+            "provider": "openai",
+            "api_key": plain_key,
+            "key_label": "Persist Test",
+        },
+        headers=auth_headers(auth_token),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] > 0
+    assert body["masked_key"] == mask_api_key(plain_key)
+    assert plain_key not in response.text
+
+    row = test_db.query(UserApiKey).filter(UserApiKey.id == body["id"]).first()
+    assert row is not None
+    assert row.provider == "openai"
+    assert decrypt_api_key(row.encrypted_api_key) == plain_key
+
+    listed = client.get("/user/api-keys", headers=auth_headers(auth_token))
+    assert listed.status_code == 200
+    keys = listed.json()
+    assert len(keys) == 1
+    assert keys[0]["id"] == body["id"]
+    assert keys[0]["masked_key"].startswith("sk-")
+    assert plain_key not in listed.text
+    assert "api_key" not in keys[0]
+
+
 def test_api_key_encrypted_at_rest(client, auth_token, test_db):
     response = client.post(
         "/user/api-keys",

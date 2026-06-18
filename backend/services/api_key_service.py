@@ -83,6 +83,7 @@ def create_user_api_key(
     api_key: str,
     key_label: str = "",
     is_active: bool = True,
+    commit: bool = True,
 ) -> UserApiKey:
     provider = validate_provider(provider)
     plain = api_key.strip()
@@ -100,7 +101,10 @@ def create_user_api_key(
         is_active=is_active,
     )
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     return row
 
