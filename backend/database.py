@@ -174,6 +174,10 @@ class Message(Base):
     )
     role = Column(String(20), nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    # text | document | image
+    content_type = Column(String(20), nullable=False, default="text")
+    generation_artifact_type = Column(String(20), nullable=True)
+    generation_artifact_id = Column(Integer, nullable=True)
     # Assistant only: "Router Selected" | "User Selected Model"
     response_label = Column(String(40), nullable=True)
     created_at = Column(
@@ -183,6 +187,36 @@ class Message(Base):
     )
 
     conversation = relationship("Conversation", back_populates="messages")
+
+
+class MessageSentiment(Base):
+    """
+    Sentiment analysis for a user message.
+
+    Extensible for future emotion scores, toxicity, and mood tracking.
+    """
+
+    __tablename__ = "message_sentiments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer, ForeignKey("messages.id"), nullable=False, unique=True, index=True
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(
+        Integer, ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    label = Column(String(30), nullable=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+    explanation = Column(Text, nullable=False, default="")
+    method = Column(String(20), nullable=False, default="rules")
+    analyzer_version = Column(String(20), nullable=False, default="v1")
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
 
 
 class AdminModelSetting(Base):
@@ -229,6 +263,25 @@ class UserModelSetting(Base):
 
 # Backward-compatible alias used in older imports
 ModelSetting = AdminModelSetting
+
+
+class ProviderSetting(Base):
+    """
+    Organization-wide provider toggle (admin Model Controls).
+
+    When disabled, every model from that provider is unavailable for routing.
+    """
+
+    __tablename__ = "provider_settings"
+
+    provider_name = Column(String(30), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class ModelRun(Base):
@@ -389,6 +442,59 @@ class ActivityLog(Base):
     owner = relationship("User", back_populates="activity_logs")
 
 
+class GeneratedDocument(Base):
+    """AI-generated downloadable document artifacts."""
+
+    __tablename__ = "generated_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=True, index=True)
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(20), nullable=False)
+    file_size = Column(Integer, nullable=False, default=0)
+    storage_path = Column(String(500), nullable=False)
+    prompt = Column(Text, nullable=False)
+    model_used = Column(String(100), nullable=False, default="")
+    file_count = Column(Integer, nullable=False, default=1)
+    is_archive = Column(Boolean, nullable=False, default=False)
+    files_json = Column(Text, nullable=True)
+    download_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+
+class GeneratedImage(Base):
+    """AI-generated image artifacts."""
+
+    __tablename__ = "generated_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=True, index=True)
+    image_type = Column(String(60), nullable=False, default="general")
+    prompt = Column(Text, nullable=False)
+    provider_used = Column(String(30), nullable=False, default="openai")
+    model_used = Column(String(100), nullable=False, default="dall-e-3")
+    storage_path = Column(String(500), nullable=False)
+    width = Column(Integer, nullable=False, default=1024)
+    height = Column(Integer, nullable=False, default=1024)
+    revised_prompt = Column(Text, nullable=True)
+    download_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+
 class ChatHistory(Base):
     __tablename__ = "chat_history"
 
@@ -422,6 +528,10 @@ def init_db() -> None:
     _migrate_rag_columns()
     _migrate_api_keys_and_logs_tables()
     _migrate_model_runs_provider_column()
+    _migrate_generation_tables()
+    _migrate_message_generation_columns()
+    _migrate_message_sentiments_table()
+    _migrate_provider_settings_table()
     _seed_model_settings()
     _seed_admin_user()
 
@@ -480,14 +590,24 @@ def _table_exists(conn, table_name: str) -> bool:
 
 
 def _seed_model_settings() -> None:
-    """Insert default enabled rows for every routable model (admin layer)."""
-    from services.model_settings import seed_admin_model_settings
+    """Insert default enabled rows for every routable model and provider."""
+    from services.model_settings import seed_admin_model_settings, seed_provider_settings
 
     db = SessionLocal()
     try:
+        seed_provider_settings(db)
         seed_admin_model_settings(db)
     finally:
         db.close()
+
+
+def _migrate_provider_settings_table() -> None:
+    """Create provider_settings table for org-wide provider toggles."""
+    with engine.connect() as conn:
+        if _table_exists(conn, "provider_settings"):
+            return
+        Base.metadata.tables["provider_settings"].create(bind=conn, checkfirst=True)
+        conn.commit()
 
 
 def _migrate_user_preferences_table() -> None:
@@ -657,6 +777,57 @@ def _migrate_model_runs_provider_column() -> None:
             conn.commit()
         except OperationalError:
             conn.rollback()
+
+
+def _migrate_generation_tables() -> None:
+    """Create generated_documents and generated_images if missing."""
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+        if "generated_documents" not in tables:
+            Base.metadata.tables["generated_documents"].create(bind=conn, checkfirst=True)
+            conn.commit()
+        if "generated_images" not in tables:
+            Base.metadata.tables["generated_images"].create(bind=conn, checkfirst=True)
+            conn.commit()
+
+
+def _migrate_message_generation_columns() -> None:
+    """Add generation metadata columns to messages."""
+    new_columns = (
+        ("content_type", "VARCHAR(20) DEFAULT 'text'"),
+        ("generation_artifact_type", "VARCHAR(20)"),
+        ("generation_artifact_id", "INTEGER"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "messages", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE messages ADD COLUMN {column_name} {column_type}")
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_message_sentiments_table() -> None:
+    """Create message_sentiments table for per-message sentiment storage."""
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+        if "message_sentiments" not in tables:
+            Base.metadata.tables["message_sentiments"].create(bind=conn, checkfirst=True)
+            conn.commit()
 
 
 def _migrate_model_runs_columns() -> None:

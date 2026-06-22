@@ -223,19 +223,19 @@ function AnalyticsDashboard({ onRefresh }) {
           </section>
 
           <div className="analytics-split">
-            <section className="analytics-panel panel">
+            <section className="analytics-panel panel analytics-panel--table">
               <h3 className="analytics-panel__title">Model Usage Breakdown</h3>
-              <div className="analytics-panel__scroll">
+              <div className="analytics-panel__scroll analytics-panel__scroll--table">
                 {modelUsage.length === 0 ? (
                   <p className="analytics-empty">
                     No model runs yet. Send a chat to populate analytics.
                   </p>
                 ) : (
-                  <div className="analytics-table-wrap">
-                    <table className="analytics-table">
+                  <div className="analytics-table-wrap analytics-table-wrap--model">
+                    <table className="analytics-table analytics-model-table">
                       <thead>
                         <tr>
-                          <th>Model</th>
+                          <th className="analytics-model-table__col-model">Model</th>
                           <th>Runs</th>
                           <th>Share</th>
                           <th>Cost</th>
@@ -253,13 +253,17 @@ function AnalyticsDashboard({ onRefresh }) {
                           const latencyMs = Number(row.average_latency_ms);
                           return (
                             <tr key={row.model}>
-                              <td className="analytics-table__model">
-                                <span
-                                  className={`provider-badge provider-badge--${row.provider || "groq"}`}
-                                >
-                                  {providerLabel(row.provider || "groq")}
-                                </span>
-                                <span className="analytics-table__model-id">{row.model}</span>
+                              <td className="analytics-model-table__cell">
+                                <div className="analytics-model-table__identity">
+                                  <span
+                                    className={`provider-badge provider-badge--compact provider-badge--${row.provider || "groq"}`}
+                                  >
+                                    {providerLabel(row.provider || "groq")}
+                                  </span>
+                                  <span className="analytics-model-table__name" title={row.model}>
+                                    {row.model}
+                                  </span>
+                                </div>
                               </td>
                               <td>{row.run_count}</td>
                               <td>

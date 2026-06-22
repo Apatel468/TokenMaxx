@@ -1,1 +1,4 @@
 backend/chroma_data/
+backend/generated_data/
+.DS_Store
+**/.DS_Store

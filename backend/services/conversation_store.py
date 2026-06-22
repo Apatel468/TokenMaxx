@@ -10,8 +10,23 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database import Conversation, Message, ModelRun, User
-from models import ConversationDetail, ConversationListItem, MessageOut, PromptAnalysisOut
+from database import (
+    Conversation,
+    GeneratedDocument,
+    GeneratedImage,
+    Message,
+    MessageSentiment,
+    ModelRun,
+    User,
+)
+from models import (
+    ConversationDetail,
+    ConversationListItem,
+    GenerationArtifactOut,
+    MessageOut,
+    PromptAnalysisOut,
+    SentimentOut,
+)
 from services.cost_tracker import CostEstimate
 from services.model_clients import ModelResponse
 from services.conversation_title import generate_conversation_title
@@ -159,6 +174,78 @@ def _prompt_enhancement_for_assistant(
     return original, enhanced, method
 
 
+def _artifact_for_message(db: Session, message: Message) -> GenerationArtifactOut | None:
+    """Load generation artifact metadata for an assistant message."""
+    if message.role != "assistant" or not message.generation_artifact_type:
+        return None
+
+    artifact_id = message.generation_artifact_id
+    if not artifact_id:
+        return None
+
+    if message.generation_artifact_type == "document":
+        row = db.query(GeneratedDocument).filter(GeneratedDocument.id == artifact_id).first()
+        if not row:
+            return None
+        return GenerationArtifactOut(
+            artifact_type="document",
+            artifact_id=row.id,
+            file_name=row.file_name,
+            file_type=row.file_type,
+            file_size=row.file_size,
+            download_url=f"/generations/documents/{row.id}/download",
+            preview_url=f"/generations/documents/{row.id}/preview",
+            created_at=format_timestamp_eastern(row.created_at),
+            model_used=row.model_used,
+            file_count=row.file_count,
+            is_archive=row.is_archive,
+        )
+
+    if message.generation_artifact_type == "image":
+        row = db.query(GeneratedImage).filter(GeneratedImage.id == artifact_id).first()
+        if not row:
+            return None
+        return GenerationArtifactOut(
+            artifact_type="image",
+            artifact_id=row.id,
+            file_name=row.storage_path.split("/")[-1],
+            file_type="png",
+            file_size=0,
+            download_url=f"/generations/images/{row.id}/download",
+            preview_url=f"/generations/images/{row.id}/file",
+            created_at=format_timestamp_eastern(row.created_at),
+            provider_used=row.provider_used,
+            model_used=row.model_used,
+            image_type=row.image_type,
+            width=row.width,
+            height=row.height,
+        )
+
+    return None
+
+
+def _sentiment_for_user_message(db: Session, message: Message) -> SentimentOut | None:
+    """Load stored sentiment for a user message."""
+    if message.role != "user":
+        return None
+    row = (
+        db.query(MessageSentiment)
+        .filter(MessageSentiment.message_id == message.id)
+        .first()
+    )
+    if not row:
+        return None
+    return SentimentOut(
+        label=row.label,
+        confidence=round(row.confidence * 100, 1),
+        explanation=row.explanation,
+        method=row.method or "rules",
+        message_id=row.message_id,
+        conversation_id=row.conversation_id,
+        created_at=format_timestamp_eastern(row.created_at),
+    )
+
+
 def _user_owns_conversation(conversation: Conversation, user: User) -> bool:
     """True when this user may read/write the conversation (admins use /admin for org-wide data)."""
     return conversation.user_id == user.id
@@ -290,6 +377,9 @@ def save_chat_turn(
     rag_chunk_count: int = 0,
     rag_source_documents: list[int] | None = None,
     rag_source_filenames: list[str] | None = None,
+    content_type: str = "text",
+    generation_artifact_type: str | None = None,
+    generation_artifact_id: int | None = None,
 ) -> tuple[int, str | None, int, int]:
     """Save one user message + assistant reply (+ model_run). Returns ids."""
     if conversation_id:
@@ -316,6 +406,9 @@ def save_chat_turn(
         role="assistant",
         content=response_text,
         response_label=ROUTER_LABEL,
+        content_type=content_type,
+        generation_artifact_type=generation_artifact_type,
+        generation_artifact_id=generation_artifact_id,
     )
     db.add(assistant_message)
     db.flush()
@@ -437,11 +530,13 @@ def get_conversation_detail(
         )
         prompt_analysis = _prompt_analysis_for_assistant(db, m)
         rag_used, source_filenames = _rag_for_assistant(db, m)
+        sentiment = _sentiment_for_user_message(db, m)
         message_rows.append(
             MessageOut(
                 id=m.id,
                 role=m.role,
                 content=m.content,
+                content_type=m.content_type or "text",
                 response_label=m.response_label or "",
                 selected_model=_selected_model_for_message(db, m),
                 original_prompt=original_prompt,
@@ -450,7 +545,9 @@ def get_conversation_detail(
                 prompt_analysis=prompt_analysis,
                 rag_used=rag_used,
                 source_filenames=source_filenames,
+                generation_artifact=_artifact_for_message(db, m),
                 created_at=format_timestamp_eastern(m.created_at),
+                sentiment=sentiment,
             )
         )
 

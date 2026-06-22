@@ -2,36 +2,38 @@
 
 **Maximum Intelligence, Minimum Cost**
 
-TokenMaxx routes prompts to the most cost-effective LLM for each task across Groq, OpenAI, and Anthropic, enhances them with Prompt Intelligence v2, retrieves context from uploaded documents (RAG), streams responses live, and tracks savings versus a GPT-4o baseline.
+TokenMaxx routes prompts to the most cost-effective LLM for each task across Groq, OpenAI, and Anthropic, enhances them with Prompt Intelligence v2, retrieves context from uploaded documents (RAG), streams responses live, generates documents and images inline in chat, analyzes message sentiment in real time, and tracks savings versus a GPT-4o baseline.
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy, LiteLLM (multi-provider) |
-| Frontend | React 18, Vite 6 |
+| Backend | Python 3.12+, FastAPI, SQLAlchemy, LiteLLM (multi-provider) |
+| Frontend | React 18, Vite 6, Vitest |
 | Auth | JWT |
-| App database | SQLite (users, conversations, analytics, document metadata) |
+| App database | SQLite (users, conversations, analytics, document metadata, sentiment, generations) |
 | Vector store | ChromaDB + sentence-transformers (RAG chunk embeddings) |
 
 ## Features
 
 - **Multi-provider routing** — 11 curated chat models across Groq, OpenAI, and Anthropic; routes only to providers with configured API keys
+- **Provider-level controls** — admins disable entire providers (Groq, OpenAI, Anthropic) in one toggle; cascades to all models
 - **LLM task classification** — Groq-powered classifier with keyword fallback
-- **Prompt Intelligence Engine v2** — analyze and enhance by task type, complexity (0–100), and persona
+- **Prompt Intelligence v2** — analyze and enhance by task type, complexity (0–100), and persona
 - **RAG document context** — upload TXT/MD/PDF; chat retrieves relevant chunks from ChromaDB
+- **Document & image generation** — detect intent in chat; generate PDF, DOCX, XLSX, PPTX, Markdown, and images inline as attachments
+- **Real-time sentiment analysis** — async tone classification panel (positive, neutral, frustrated, urgent, etc.); stored per message
 - **SSE streaming chat** — token-by-token responses via `POST /chat/stream`
-- **Task-aware routing** — complexity-aware scoring with task-specific model bonuses (including premium models for business/coding)
-- **Routing debug panel** — top 3 candidate scores, provider availability, classification confidence, reason
+- **Task-aware routing** — complexity-aware scoring with task-specific model bonuses
+- **Routing debug panel** — top candidates, provider availability, classification confidence
 - **Model regenerate** — retry with any top-5 model (one API call per click)
-- **Model Controls** — admin org-wide and user personal toggles; per-user API keys (Groq, OpenAI, Anthropic, Google)
+- **Model Controls** — provider toggles + per-model admin/user toggles; per-user API keys
 - **Documents** — upload, list, and delete RAG source files
 - **Activity logs** — timestamped backend events for routing, RAG, model calls, and errors
-- **Prompt optimization viewer** — task, complexity, persona, strategy, enhanced prompt
 - **Analytics** — usage KPIs, model and provider breakdown, CSV export
 - **Authentication** — JWT; per-user conversations and analytics
 - **Admin dashboard** — employee usage metrics
-- **pytest suite** — 85 tests
+- **Tests** — 118 backend pytest tests + 9 frontend Vitest tests
 
 ## Supported models (chat)
 
@@ -43,15 +45,17 @@ TokenMaxx routes prompts to the most cost-effective LLM for each task across Gro
 
 Groq-hosted models are optionally synced against the live Groq API when `GROQ_API_KEY` is set. `whisper-large-v3` is cataloged for audio but is not chat-routable.
 
+**Model availability:** `provider_enabled AND admin_enabled AND user_enabled`
+
 ## App tabs
 
 | Tab | Purpose |
 |-----|---------|
-| Chat | Streaming chat with routing panel, provider badges, and RAG badges |
+| Chat | Streaming chat, sentiment panel, routing panel, inline generation attachments |
 | Analytics | Usage KPIs, model/provider breakdown, CSV export |
 | Documents | Upload/manage RAG files (TXT, MD, PDF) |
 | Logs | Activity log viewer (admin can see all users) |
-| Model Controls | Model toggles, prompt enhancement, API keys |
+| Model Controls | Provider toggles, model toggles, prompt enhancement, API keys |
 | Admin | Employee usage (admins only) |
 
 ## Local development
@@ -74,7 +78,7 @@ uvicorn main:app --reload --port 8001
 
 First RAG upload downloads the `all-MiniLM-L6-v2` embedding model (~90 MB).
 
-At minimum set `GROQ_API_KEY` for classifier/enhancer/title. Add `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` to route to those providers.
+At minimum set `GROQ_API_KEY` for classifier/enhancer/title and document generation content. Add `OPENAI_API_KEY` for OpenAI routing and real image generation (DALL-E).
 
 ### Frontend
 
@@ -97,6 +101,7 @@ npm run dev
 
 ```bash
 cd backend && source venv/bin/activate && pytest -v
+cd frontend && npm test
 ```
 
 ## Environment variables (backend)
@@ -104,13 +109,14 @@ cd backend && source venv/bin/activate && pytest -v
 See `backend/.env.example`. Key vars:
 
 | Variable | Purpose |
-|----------|---------|
-| `GROQ_API_KEY` | Groq inference + classifier/enhancer/title (required for real LLM locally) |
-| `OPENAI_API_KEY` | App-level OpenAI key (enables gpt-4o-mini, gpt-4o, o3-mini routing) |
+|----------|--------|
+| `GROQ_API_KEY` | Groq inference + classifier/enhancer/title/document content |
+| `OPENAI_API_KEY` | OpenAI routing + DALL-E image generation |
 | `ANTHROPIC_API_KEY` | App-level Anthropic key (enables Claude models) |
-| `GEMINI_API_KEY` | App-level Google key (for user key testing; no Gemini chat models in catalog yet) |
+| `GEMINI_API_KEY` | App-level Google key (for user key testing; no Gemini chat models yet) |
 | `JWT_SECRET` | Auth token signing |
 | `CHROMA_PERSIST_DIR` | ChromaDB storage path (default: `backend/chroma_data/`) |
+| `GENERATED_FILES_DIR` | Generated documents/images storage (default: `backend/generated_data/`) |
 | `RAG_SIMILARITY_THRESHOLD` | Min score for RAG chunks in chat (default: `0.4`) |
 | `API_KEY_ENCRYPTION_SECRET` | Encrypt user API keys at rest (falls back to `JWT_SECRET`) |
 | `ALLOW_MOCK_LLM` | Mock responses when no key (default: `true` for local demos) |
@@ -139,7 +145,7 @@ Use the blueprint at [`render.yaml`](render.yaml) or configure manually.
 
 Required: `JWT_SECRET`, `CORS_ORIGINS`. Recommended: `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `API_KEY_ENCRYPTION_SECRET`.
 
-For persistent SQLite, attach a disk at `/var/data`. For persistent RAG vectors, set `CHROMA_PERSIST_DIR` on a mounted disk path.
+For persistent SQLite, attach a disk at `/var/data`. For persistent RAG vectors and generated files, set `CHROMA_PERSIST_DIR` and `GENERATED_FILES_DIR` on mounted disk paths.
 
 Full guide: [docs/deploy-render.md](docs/deploy-render.md)
 

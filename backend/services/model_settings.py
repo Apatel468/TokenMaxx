@@ -2,7 +2,7 @@
 Model Settings — admin (org-wide) and per-user enable/disable preferences.
 
 Effective routing availability:
-    model_enabled = admin_enabled AND user_enabled
+    model_enabled = provider_enabled AND admin_enabled AND user_enabled
 
 Missing DB rows default to enabled=True. Existing rows with enabled=False
 are never overridden on load.
@@ -16,10 +16,12 @@ logger = logging.getLogger(__name__)
 
 from config.model_registry import (
     CHAT_MODEL_IDS,
+    ProviderName,
     cost_per_1k_tokens,
+    get_provider_for_model,
     tier_for_model,
 )
-from database import AdminModelSetting, UserModelSetting
+from database import AdminModelSetting, ProviderSetting, UserModelSetting
 from services.config_loader import get_allowed_task_types, resolve_task_key
 from services.groq_models import get_routable_model_ids, get_routable_models
 from services.model_scorer import score_candidates
@@ -29,6 +31,96 @@ FALLBACK_BADGE_USER = (
     "Preferred model disabled in your preferences — fallback used"
 )
 FALLBACK_BADGE = FALLBACK_BADGE_ADMIN
+
+PROVIDER_DISPLAY_ORDER: tuple[ProviderName, ...] = (
+    "groq",
+    "anthropic",
+    "openai",
+    "google",
+)
+
+
+def get_catalog_providers() -> list[str]:
+    """Unique providers from the routable chat catalog, in display order."""
+    seen = {record.provider for record in get_routable_models()}
+    return [provider for provider in PROVIDER_DISPLAY_ORDER if provider in seen]
+
+
+def seed_provider_settings(db: Session) -> None:
+    """Insert provider rows only when missing (default enabled)."""
+    for provider in get_catalog_providers():
+        existing = (
+            db.query(ProviderSetting)
+            .filter(ProviderSetting.provider_name == provider)
+            .first()
+        )
+        if not existing:
+            db.add(ProviderSetting(provider_name=provider, enabled=True))
+    db.commit()
+
+
+def _provider_enabled_map(db: Session) -> dict[str, bool]:
+    """Read provider flags from DB; default True when row is missing."""
+    seed_provider_settings(db)
+    rows = {
+        row.provider_name: row.enabled
+        for row in db.query(ProviderSetting).all()
+    }
+    return {
+        provider: bool(rows[provider]) if provider in rows else True
+        for provider in get_catalog_providers()
+    }
+
+
+def is_provider_enabled(db: Session, provider: str) -> bool:
+    return _provider_enabled_map(db).get(provider, True)
+
+
+def get_enabled_provider_names(db: Session) -> set[str]:
+    provider_map = _provider_enabled_map(db)
+    return {name for name, on in provider_map.items() if on}
+
+
+def list_provider_settings(db: Session) -> list[dict]:
+    """Provider toggles with model counts for Model Controls."""
+    provider_map = _provider_enabled_map(db)
+    counts: dict[str, int] = {provider: 0 for provider in get_catalog_providers()}
+    for record in get_routable_models():
+        counts[record.provider] = counts.get(record.provider, 0) + 1
+
+    return [
+        {
+            "provider": provider,
+            "enabled": provider_map.get(provider, True),
+            "model_count": counts.get(provider, 0),
+        }
+        for provider in get_catalog_providers()
+    ]
+
+
+def save_provider_settings(db: Session, updates: list[dict]) -> list[dict]:
+    """UPSERT provider_settings for known catalog providers."""
+    known = set(get_catalog_providers())
+    for item in updates:
+        provider = item["provider"]
+        if provider not in known:
+            continue
+        row = (
+            db.query(ProviderSetting)
+            .filter(ProviderSetting.provider_name == provider)
+            .first()
+        )
+        if row:
+            row.enabled = bool(item["enabled"])
+        else:
+            db.add(
+                ProviderSetting(
+                    provider_name=provider,
+                    enabled=bool(item["enabled"]),
+                )
+            )
+    db.commit()
+    return list_provider_settings(db)
 
 
 def get_unique_routable_model_ids() -> list[str]:
@@ -218,10 +310,13 @@ def get_user_enabled_model_ids(db: Session, user_id: int) -> set[str]:
 def get_enabled_model_ids(db: Session, user_id: int) -> set[str]:
     admin_map = _admin_enabled_map(db)
     user_map = _user_enabled_map(db, user_id)
+    provider_map = _provider_enabled_map(db)
     return {
         model_id
         for model_id in get_unique_routable_model_ids()
-        if admin_map.get(model_id, True) and user_map.get(model_id, True)
+        if admin_map.get(model_id, True)
+        and user_map.get(model_id, True)
+        and provider_map.get(get_provider_for_model(model_id), True)
     }
 
 
@@ -237,6 +332,9 @@ def get_model_disabled_reason(
 
     Messages match the regenerate UI spec.
     """
+    provider = get_provider_for_model(model_id)
+    if not is_provider_enabled(db, provider):
+        return "Disabled by administrator"
     admin_ok = is_admin_model_enabled(db, model_id)
     user_ok = model_id in get_user_enabled_model_ids(db, user_id)
     if admin_ok and user_ok:
@@ -255,6 +353,11 @@ def explain_preferred_unavailable(
     db: Session,
     user_id: int,
 ) -> tuple[str, str]:
+    provider = get_provider_for_model(preferred_id)
+    if not is_provider_enabled(db, provider):
+        fragment = f"Preferred model ({preferred_id}) is disabled — provider {provider} is off."
+        return fragment, FALLBACK_BADGE_ADMIN
+
     admin_ok = is_admin_model_enabled(db, preferred_id)
     user_ok = preferred_id in get_user_enabled_model_ids(db, user_id)
 
@@ -294,12 +397,19 @@ def _best_tasks_for_model(model_id: str) -> list[str]:
     return best_for or [resolve_task_key("general_qa")]
 
 
-def _base_model_row(record, admin_enabled: bool, user_enabled: bool) -> dict:
+def _base_model_row(
+    record,
+    admin_enabled: bool,
+    user_enabled: bool,
+    *,
+    provider_enabled: bool = True,
+) -> dict:
     model_id = record.model_id
     meta = record.metadata
     cost_in, cost_out = cost_per_1k_tokens(model_id, meta)
+    disabled_by_provider = not provider_enabled
     disabled_by_admin = not admin_enabled
-    effective = admin_enabled and user_enabled
+    effective = provider_enabled and admin_enabled and user_enabled
 
     return {
         "model_id": model_id,
@@ -307,8 +417,10 @@ def _base_model_row(record, admin_enabled: bool, user_enabled: bool) -> dict:
         "provider": meta["provider"],
         "tier": tier_for_model(model_id, meta),
         "task_types": _best_tasks_for_model(model_id),
+        "provider_enabled": provider_enabled,
         "admin_enabled": admin_enabled,
         "user_enabled": user_enabled,
+        "disabled_by_provider": disabled_by_provider,
         "disabled_by_admin": disabled_by_admin,
         "available": effective,
         "enabled": effective,
@@ -325,13 +437,24 @@ def list_model_settings(db: Session, user_id: int, *, is_admin: bool) -> list[di
     """
     admin_map = _admin_enabled_map(db)
     user_map = _user_enabled_map(db, user_id)
+    provider_map = _provider_enabled_map(db)
     results: list[dict] = []
     for record in get_routable_models():
         model_id = record.model_id
         admin_enabled = admin_map.get(model_id, True)
         user_enabled = user_map.get(model_id, True)
-        row = _base_model_row(record, admin_enabled, user_enabled)
-        row["toggle_enabled"] = admin_enabled if is_admin else user_enabled
+        provider_enabled = provider_map.get(record.provider, True)
+        row = _base_model_row(
+            record,
+            admin_enabled,
+            user_enabled,
+            provider_enabled=provider_enabled,
+        )
+        row["toggle_enabled"] = (
+            provider_enabled and admin_enabled
+            if is_admin
+            else provider_enabled and user_enabled and admin_enabled
+        )
         results.append(row)
     return results
 
@@ -350,12 +473,19 @@ def save_model_settings(
 def list_admin_model_settings(db: Session) -> list[dict]:
     """Admin Model Controls — org-wide toggles only."""
     admin_map = _admin_enabled_map(db)
+    provider_map = _provider_enabled_map(db)
     results: list[dict] = []
     for record in get_routable_models():
         admin_enabled = admin_map.get(record.model_id, True)
-        row = _base_model_row(record, admin_enabled, user_enabled=True)
-        row["enabled"] = admin_enabled
-        row["toggle_enabled"] = admin_enabled
+        provider_enabled = provider_map.get(record.provider, True)
+        row = _base_model_row(
+            record,
+            admin_enabled,
+            user_enabled=True,
+            provider_enabled=provider_enabled,
+        )
+        row["enabled"] = provider_enabled and admin_enabled
+        row["toggle_enabled"] = provider_enabled and admin_enabled
         results.append(row)
     return results
 
@@ -364,13 +494,20 @@ def list_user_model_settings(db: Session, user_id: int) -> list[dict]:
     """User Model Controls — personal toggles with admin lock state."""
     admin_map = _admin_enabled_map(db)
     user_map = _user_enabled_map(db, user_id)
+    provider_map = _provider_enabled_map(db)
     results: list[dict] = []
     for record in get_routable_models():
         model_id = record.model_id
         admin_enabled = admin_map.get(model_id, True)
         user_enabled = user_map.get(model_id, True)
-        row = _base_model_row(record, admin_enabled, user_enabled)
-        row["toggle_enabled"] = user_enabled
+        provider_enabled = provider_map.get(record.provider, True)
+        row = _base_model_row(
+            record,
+            admin_enabled,
+            user_enabled,
+            provider_enabled=provider_enabled,
+        )
+        row["toggle_enabled"] = provider_enabled and user_enabled and admin_enabled
         results.append(row)
     return results
 
@@ -378,10 +515,13 @@ def list_user_model_settings(db: Session, user_id: int) -> list[dict]:
 def save_admin_model_settings(db: Session, updates: list[dict]) -> list[dict]:
     """UPSERT admin_model_settings for every model in the payload."""
     known_ids = set(get_unique_routable_model_ids())
+    provider_map = _provider_enabled_map(db)
 
     for item in updates:
         model_id = item["model_id"]
         if model_id not in known_ids:
+            continue
+        if not provider_map.get(get_provider_for_model(model_id), True):
             continue
         _upsert_admin_setting(db, model_id, bool(item["enabled"]))
 
@@ -395,10 +535,13 @@ def save_user_model_settings(
     """UPSERT user_model_settings; skip toggles on admin-disabled models."""
     known_ids = set(get_unique_routable_model_ids())
     admin_map = _admin_enabled_map(db)
+    provider_map = _provider_enabled_map(db)
 
     for item in updates:
         model_id = item["model_id"]
         if model_id not in known_ids:
+            continue
+        if not provider_map.get(get_provider_for_model(model_id), True):
             continue
         if not admin_map.get(model_id, True):
             continue

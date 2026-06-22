@@ -12,14 +12,21 @@
 
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { regenerateChat, streamChat } from "../api/chat.js";
 
 import { fetchConversation, fetchConversations } from "../api/conversations.js";
+import {
+  analyzeSentiment,
+  fetchSentimentHistory,
+  storeSentiment,
+} from "../api/sentiment.js";
 
 import PromptEnhancementViewer from "./PromptEnhancementViewer.jsx";
+import GeneratedAssetRenderer from "./attachments/GeneratedAssetRenderer.jsx";
 import { CostMetricCard, SavingsMetricCard } from "./CostMetricDisplay.jsx";
+import SentimentPanel from "./SentimentPanel.jsx";
 
 import { resolveChatTitle, resolveSidebarTitle } from "../utils/conversationTitle.js";
 
@@ -87,6 +94,16 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
   const [error, setError] = useState(null);
 
+  const [sentimentCurrent, setSentimentCurrent] = useState(null);
+
+  const [sentimentHistory, setSentimentHistory] = useState([]);
+
+  const [sentimentLoading, setSentimentLoading] = useState(false);
+
+  const [sentimentError, setSentimentError] = useState(null);
+
+  const pendingSentimentRef = useRef(null);
+
 
 
   const chatTitle = resolveChatTitle({
@@ -131,6 +148,86 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
 
 
+  const loadSentimentHistory = useCallback(async (id) => {
+
+    if (!id) {
+
+      setSentimentHistory([]);
+
+      setSentimentCurrent(null);
+
+      return;
+
+    }
+
+    try {
+
+      const data = await fetchSentimentHistory(id);
+
+      setSentimentHistory(data.items || []);
+
+      const latest = data.items?.[data.items.length - 1];
+
+      if (latest) setSentimentCurrent(latest);
+
+    } catch {
+
+      setSentimentHistory([]);
+
+    }
+
+  }, []);
+
+
+
+  function runSentimentAnalysis(text, convId) {
+
+    setSentimentLoading(true);
+
+    setSentimentError(null);
+
+    analyzeSentiment({ text, conversationId: convId })
+
+      .then((data) => {
+
+        pendingSentimentRef.current = data;
+
+        setSentimentCurrent(data);
+
+        setSentimentHistory((prev) => [
+
+          ...prev,
+
+          { ...data, message_id: data.message_id || `pending-${Date.now()}` },
+
+        ]);
+
+      })
+
+      .catch(() => {
+
+        pendingSentimentRef.current = null;
+
+        setSentimentCurrent({
+
+          label: "unknown",
+
+          confidence: 0,
+
+          explanation: "Unable to determine sentiment",
+
+        });
+
+        setSentimentError("Unable to determine sentiment");
+
+      })
+
+      .finally(() => setSentimentLoading(false));
+
+  }
+
+
+
   /** Open an existing conversation from the sidebar */
 
   async function openConversation(id) {
@@ -148,6 +245,8 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
       setConversationTitle(detail.title || null);
 
       setMessages(detail.messages);
+
+      await loadSentimentHistory(detail.id);
 
     } catch (err) {
 
@@ -174,6 +273,14 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
     setResult(null);
 
     setError(null);
+
+    setSentimentCurrent(null);
+
+    setSentimentHistory([]);
+
+    setSentimentError(null);
+
+    pendingSentimentRef.current = null;
 
   }
 
@@ -215,6 +322,8 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
     setStreamingMessageId(streamId);
     setPrompt("");
 
+    runSentimentAnalysis(trimmed, conversationId);
+
 
 
     let routingApplied = false;
@@ -248,6 +357,39 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
             )
           );
         },
+        onGenerationStart: (data) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === streamId
+                ? {
+                    ...message,
+                    content: `Generating ${data?.modality || "file"}…`,
+                    content_type: data?.modality,
+                  }
+                : message
+            )
+          );
+        },
+        onGenerationProgress: (data) => {
+          if (data?.message) {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === streamId
+                  ? { ...message, content: data.message }
+                  : message
+              )
+            );
+          }
+        },
+        onArtifact: (artifact) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === streamId
+                ? { ...message, generation_artifact: artifact }
+                : message
+            )
+          );
+        },
         onComplete: async (data) => {
           setConversationId(data.conversation_id);
           if (data.title?.trim()) {
@@ -259,6 +401,41 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
           setMessages(detail.messages);
           setResult(data);
           loadConversationList();
+
+          const pending = pendingSentimentRef.current;
+
+          if (pending && data.user_message_id) {
+
+            try {
+
+              await storeSentiment({
+
+                messageId: data.user_message_id,
+
+                conversationId: data.conversation_id,
+
+                label: pending.label,
+
+                confidence: pending.confidence,
+
+                explanation: pending.explanation,
+
+                method: pending.method || "rules",
+
+              });
+
+            } catch {
+
+              // sentiment persistence is non-fatal
+
+            }
+
+          }
+
+          await loadSentimentHistory(data.conversation_id);
+
+          pendingSentimentRef.current = null;
+
           if (onChatComplete) onChatComplete();
         },
         onError: (errorData) => {
@@ -491,6 +668,21 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                         promptAnalysis={msg.prompt_analysis}
                       />
                     )}
+                    {(msg.generation_artifact ||
+                      (isActiveStream && result?.generation_artifact)) && (
+                      <GeneratedAssetRenderer
+                        artifact={
+                          msg.generation_artifact || result?.generation_artifact
+                        }
+                        onRegenerated={async (data) => {
+                          if (data?.conversation_id) {
+                            const detail = await fetchConversation(data.conversation_id);
+                            setMessages(detail.messages);
+                            setResult(data);
+                          }
+                        }}
+                      />
+                    )}
                   </>
                 )}
 
@@ -558,7 +750,21 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
 
 
 
-        {/* ---- Latest routing result ---- */}
+        {/* ---- Right column: sentiment + routing ---- */}
+
+        <aside className="chat-side-column">
+
+          <SentimentPanel
+
+            current={sentimentCurrent}
+
+            history={sentimentHistory}
+
+            loading={sentimentLoading}
+
+            error={sentimentError}
+
+          />
 
         <section className="panel panel--result routing-panel">
 
@@ -607,6 +813,14 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                           : []
                       }
                     />
+                  )}
+
+                  {result.modality && result.modality !== "chat" && (
+                    <div className="routing-modality-badge" role="status">
+                      {result.modality === "document"
+                        ? "Document Generation"
+                        : "Image Generation"}
+                    </div>
                   )}
 
                   <div className="result__grid">
@@ -927,6 +1141,8 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
           </div>
 
         </section>
+
+        </aside>
 
       </div>
 

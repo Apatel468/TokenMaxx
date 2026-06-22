@@ -336,6 +336,93 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="Filenames of documents used as RAG context.",
     )
+    modality: str = Field(
+        default="chat",
+        description='Response modality: "chat", "document", or "image".',
+    )
+    generation_artifact: "GenerationArtifactOut | None" = Field(
+        default=None,
+        description="Generated file or image artifact when modality is document/image.",
+    )
+
+
+class GenerationArtifactOut(BaseModel):
+    """Metadata for a generated document or image."""
+
+    artifact_type: str  # document | image
+    artifact_id: int
+    file_name: str = ""
+    file_type: str = ""
+    file_size: int = 0
+    download_url: str = ""
+    preview_url: str = ""
+    created_at: str = ""
+    model_used: str = ""
+    provider_used: str = ""
+    image_type: str = ""
+    width: int = 0
+    height: int = 0
+    file_count: int = 1
+    is_archive: bool = False
+    files: list[dict] = Field(default_factory=list)
+    preview_url: str = ""
+
+
+class DocumentPreviewOut(BaseModel):
+    """Preview payload for inline chat rendering."""
+
+    preview_type: str
+    content: str = ""
+    language: str = ""
+    message: str = ""
+    table: dict = Field(default_factory=dict)
+    files: list[dict] = Field(default_factory=list)
+
+
+class GeneratedDocumentOut(BaseModel):
+    """One row in document generation history."""
+
+    id: int
+    file_name: str
+    file_type: str
+    file_size: int
+    prompt: str
+    model_used: str
+    file_count: int = 1
+    is_archive: bool = False
+    download_count: int = 0
+    created_at: str
+    conversation_id: int | None = None
+    message_id: int | None = None
+
+
+class GeneratedImageOut(BaseModel):
+    """One row in image generation history."""
+
+    id: int
+    image_type: str
+    prompt: str
+    provider_used: str
+    model_used: str
+    width: int
+    height: int
+    preview_url: str
+    download_url: str
+    download_count: int = 0
+    created_at: str
+    conversation_id: int | None = None
+    message_id: int | None = None
+
+
+class GenerationHistoryOut(BaseModel):
+    """Combined generation history response."""
+
+    documents: list[GeneratedDocumentOut] = Field(default_factory=list)
+    images: list[GeneratedImageOut] = Field(default_factory=list)
+
+
+# Resolve forward reference for ChatResponse
+ChatResponse.model_rebuild()
 
 
 # ---------------------------------------------------------------------------
@@ -350,14 +437,43 @@ class ModelControlItem(BaseModel):
     provider: str
     tier: str
     task_types: list[str]
+    provider_enabled: bool = True
     admin_enabled: bool = True
     user_enabled: bool = True
+    disabled_by_provider: bool = False
     disabled_by_admin: bool = False
     available: bool = True
     enabled: bool
     toggle_enabled: bool = True
     cost_per_1k_input: float
     cost_per_1k_output: float
+
+
+class ProviderSettingItem(BaseModel):
+    """One provider row in Model Controls."""
+
+    provider: str
+    enabled: bool = True
+    model_count: int = 0
+
+
+class ProviderSettingsResponse(BaseModel):
+    """GET /provider-settings response."""
+
+    providers: list[ProviderSettingItem]
+
+
+class ProviderSettingToggle(BaseModel):
+    """Single provider enable/disable change."""
+
+    provider: str
+    enabled: bool = True
+
+
+class ProviderSettingsUpdate(BaseModel):
+    """PUT /provider-settings body."""
+
+    providers: list[ProviderSettingToggle]
 
 
 class ModelControlToggle(BaseModel):
@@ -497,6 +613,7 @@ class MessageOut(BaseModel):
     id: int
     role: str
     content: str
+    content_type: str = "text"
     response_label: str = ""
     selected_model: str = Field(
         default="",
@@ -526,9 +643,62 @@ class MessageOut(BaseModel):
         default_factory=list,
         description="Uploaded document filenames used as RAG context.",
     )
+    generation_artifact: GenerationArtifactOut | None = Field(
+        default=None,
+        description="Generated document or image attached to this message.",
+    )
     created_at: str = Field(
         description="Message time in America/New_York (e.g. 6/11/2026 9:28 AM EDT).",
     )
+    sentiment: "SentimentOut | None" = Field(
+        default=None,
+        description="Sentiment analysis for user messages.",
+    )
+
+
+class SentimentOut(BaseModel):
+    """Sentiment classification for a user message."""
+
+    label: str = Field(description="positive | neutral | negative | excited | frustrated | confused | urgent | unknown")
+    confidence: float = Field(
+        ge=0,
+        le=100,
+        description="Confidence score from 0 to 100 percent.",
+    )
+    explanation: str = ""
+    method: str = "rules"
+    message_id: int | None = None
+    conversation_id: int | None = None
+    created_at: str | None = None
+
+
+class SentimentAnalyzeRequest(BaseModel):
+    """POST /sentiment/analyze body."""
+
+    text: str = Field(min_length=1, max_length=20000)
+    conversation_id: int | None = None
+    message_id: int | None = Field(
+        default=None,
+        description="When set, persist sentiment on this user message after analysis.",
+    )
+
+
+class SentimentStoreRequest(BaseModel):
+    """POST /sentiment/store — attach a prior analysis result to a message."""
+
+    message_id: int
+    conversation_id: int | None = None
+    label: str
+    confidence: float = Field(ge=0, le=100)
+    explanation: str = ""
+    method: str = "rules"
+
+
+class SentimentHistoryResponse(BaseModel):
+    """GET /sentiment/conversations/{id}/history"""
+
+    conversation_id: int
+    items: list[SentimentOut]
 
 
 class ConversationListItem(BaseModel):

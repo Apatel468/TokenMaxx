@@ -4,6 +4,8 @@ Shared chat pipeline helpers for POST /chat and POST /chat/stream.
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.orm import Session
 
 from database import User
@@ -28,6 +30,10 @@ from services.activity_logger import record_activity, with_request_meta
 from services.rag_service import apply_rag_to_context, rag_metadata_dict, retrieve_for_chat
 from services.router_engine import RoutingDecision, route
 from services.context_builder import PromptContext
+from services.generation.intent import GenerationIntent, detect_generation_intent
+from database import GeneratedDocument, GeneratedImage
+from models import GenerationArtifactOut
+from services.timezone_utils import format_timestamp_eastern
 
 
 def prompt_analysis_to_out(
@@ -54,8 +60,8 @@ def prepare_chat_turn(
     request: ChatRequest,
     *,
     request_id: str | None = None,
-) -> tuple[AnalysisResult, PromptContext, RoutingDecision, float, list[dict]]:
-    """Classify, enhance, and route — shared by sync and streaming chat."""
+) -> tuple[AnalysisResult, PromptContext, RoutingDecision, float, list[dict], GenerationIntent]:
+    """Classify, enhance, route, and detect generation modality."""
     prior_messages: list[dict] = []
     if request.conversation_id is not None:
         get_conversation_or_404(db, request.conversation_id, user=user)
@@ -72,6 +78,7 @@ def prepare_chat_turn(
         )
 
     analysis = analyze_prompt(request.prompt)
+    generation_intent = detect_generation_intent(request.prompt)
     context = build_context(
         request.prompt,
         analysis,
@@ -144,9 +151,25 @@ def prepare_chat_turn(
             model=decision.model_id,
             provider=decision.provider,
             routing_score=decision.score,
+            modality=generation_intent.modality,
         ),
     )
-    return analysis, context, decision, enhancement_cost_saved, prior_messages
+    if generation_intent.modality != "chat":
+        record_activity(
+            db,
+            user_id=user.id,
+            event_type="generation_classified",
+            message=f"Generation intent: {generation_intent.modality}.",
+            conversation_id=request.conversation_id,
+            metadata=with_request_meta(
+                request_id=request_id,
+                modality=generation_intent.modality,
+                file_type=generation_intent.file_type,
+                image_type=generation_intent.image_type,
+                confidence=generation_intent.confidence,
+            ),
+        )
+    return analysis, context, decision, enhancement_cost_saved, prior_messages, generation_intent
 
 
 def persist_chat_turn(
@@ -198,6 +221,7 @@ def build_routing_metadata(
     analysis: AnalysisResult,
     context: PromptContext,
     decision: RoutingDecision,
+    generation_intent: GenerationIntent,
 ) -> dict:
     """Routing panel fields available before generation completes."""
     top_recs = build_top_recommendations(
@@ -234,7 +258,65 @@ def build_routing_metadata(
         "routing_explanation": decision.routing_explanation,
         "prompt_analysis": prompt_analysis_to_out(context.prompt_analysis),
         **rag_metadata_dict(context),
+        "modality": generation_intent.modality,
+        "generation_intent": {
+            "modality": generation_intent.modality,
+            "file_type": generation_intent.file_type,
+            "image_type": generation_intent.image_type,
+            "is_project": generation_intent.is_project,
+            "confidence": generation_intent.confidence,
+        },
     }
+
+
+def _artifact_out_from_db(
+    db: Session,
+    artifact_type: str,
+    artifact_id: int,
+) -> GenerationArtifactOut | None:
+    if artifact_type == "document":
+        row = db.query(GeneratedDocument).filter(GeneratedDocument.id == artifact_id).first()
+        if not row:
+            return None
+        files = []
+        if row.files_json:
+            try:
+                files = json.loads(row.files_json)
+            except json.JSONDecodeError:
+                files = []
+        return GenerationArtifactOut(
+            artifact_type="document",
+            artifact_id=row.id,
+            file_name=row.file_name,
+            file_type=row.file_type,
+            file_size=row.file_size,
+            download_url=f"/generations/documents/{row.id}/download",
+            preview_url=f"/generations/documents/{row.id}/preview",
+            created_at=format_timestamp_eastern(row.created_at),
+            model_used=row.model_used,
+            file_count=row.file_count,
+            is_archive=row.is_archive,
+            files=files,
+        )
+    if artifact_type == "image":
+        row = db.query(GeneratedImage).filter(GeneratedImage.id == artifact_id).first()
+        if not row:
+            return None
+        return GenerationArtifactOut(
+            artifact_type="image",
+            artifact_id=row.id,
+            file_name=row.storage_path.split("/")[-1],
+            file_type="png",
+            download_url=f"/generations/images/{row.id}/download",
+            preview_url=f"/generations/images/{row.id}/file",
+            created_at=format_timestamp_eastern(row.created_at),
+            provider_used=row.provider_used,
+            model_used=row.model_used,
+            image_type=row.image_type,
+            width=row.width,
+            height=row.height,
+        )
+    return None
 
 
 def build_chat_response(
@@ -250,8 +332,15 @@ def build_chat_response(
     assistant_message_id: int,
     db: Session,
     user: User,
+    *,
+    modality: str = "chat",
+    generation_artifact_id: int | None = None,
 ) -> ChatResponse:
     """Assemble the full ChatResponse payload."""
+    artifact = None
+    if generation_artifact_id and modality in ("document", "image"):
+        artifact = _artifact_out_from_db(db, modality, generation_artifact_id)
+
     top_recs = build_top_recommendations(
         db,
         user.id,
@@ -296,4 +385,6 @@ def build_chat_response(
         assistant_message_id=assistant_message_id,
         prompt_analysis=prompt_analysis_to_out(context.prompt_analysis),
         **rag_metadata_dict(context),
+        modality=modality,
+        generation_artifact=artifact,
     )

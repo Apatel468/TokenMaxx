@@ -1,7 +1,7 @@
 # TokenMaxx — Architectural Decisions
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.6.0 · **Last updated:** June 2026  
+> **Version:** 0.7.0 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
 
 ---
@@ -18,7 +18,7 @@
 | Streaming | Server-Sent Events | `POST /chat/stream`; frontend uses fetch + ReadableStream |
 | Providers | Groq, OpenAI, Anthropic (allowlisted) | Cost/speed on Groq; premium tiers when keys configured |
 | Frontend | React + Vite | Fast iteration |
-| Tests | pytest + httpx | 85 tests; mocked LLM/stream in CI |
+| Tests | pytest + Vitest | 118 backend + 9 frontend tests; mocked LLM/stream in CI |
 
 ---
 
@@ -87,7 +87,26 @@
 **Decision:** User toggle `enhance_prompts`; when off, `build_disabled_analysis()` skips enhancer Groq call.
 
 ### Two-tier model enable/disable (v0.3.1) 🔒
-**Rule:** `available = admin_enabled AND user_enabled`
+**Rule (v0.7.0):** `available = provider_enabled AND admin_enabled AND user_enabled`  
+Provider toggles in `provider_settings` table; `GET/PUT /provider-settings` (PUT admin only).
+
+### Provider-level controls (v0.7.0) 🔒
+**Decision:** Admins can disable entire providers (Groq, OpenAI, Anthropic) with one toggle.  
+**Effect:** All models from that provider excluded from routing; model toggles read-only with "Disabled by provider setting".  
+**Why:** Faster ops than disabling models one-by-one; mirrors cloud console patterns.
+
+### Real-time sentiment analysis (v0.7.0)
+**Decision:** Async `POST /sentiment/analyze` runs parallel to chat; results in right panel + `message_sentiments` table.  
+**Does not affect:** Routing, prompt enhancement, or LLM responses (display + analytics only).  
+**Classifier:** Rule-based keyword patterns (7 labels + unknown); extensible for LLM/emotion/toxicity.  
+**Why:** Operator visibility without adding latency to chat pipeline.
+
+### Document & image generation (v0.7.0) 🔒
+**Decision:** Intent detection in `generation/intent.py` branches chat pipeline to document or image flows.  
+**Documents:** LLM writes content → ReportLab/python-docx/openpyxl/python-pptx render files.  
+**Images:** DALL-E via OpenAI key; mock placeholder without key.  
+**UX:** Inline attachments in chat (no separate Generations tab).  
+**Storage:** `generated_documents`, `generated_images` tables + `GENERATED_FILES_DIR`.
 
 ### Original prompt preserved in DB 🔒
 User `messages.content` = original text; `model_runs.enhanced_prompt` = clean enhanced text sent to model.

@@ -69,6 +69,7 @@ The blueprint provisions:
 | `ADMIN_PASSWORD` | No | Seeds admin on startup |
 | `API_KEY_ENCRYPTION_SECRET` | Recommended | Encrypts user API keys at rest |
 | `CHROMA_PERSIST_DIR` | No | RAG vector store path (use `/var/data/chroma` with disk) |
+| `GENERATED_FILES_DIR` | No | Generated documents/images (use `/var/data/generated` with disk) |
 | `RAG_SIMILARITY_THRESHOLD` | No | Default `0.4` |
 | `ALLOW_MOCK_LLM` | No | Default `true`; set `false` in production |
 
@@ -80,6 +81,7 @@ The blueprint provisions:
    Without a disk, SQLite and ChromaDB live on ephemeral storage and **reset on redeploy**.
 
    For RAG persistence, also set `CHROMA_PERSIST_DIR=/var/data/chroma`.
+   For generated file persistence, set `GENERATED_FILES_DIR=/var/data/generated`.
 
 ---
 
@@ -99,6 +101,7 @@ All secrets are read from `os.environ` (set in Render dashboard or `render.yaml`
 | `DATABASE_URL` | `database.py` |
 | `CORS_ORIGINS` | `main.py` CORS middleware |
 | `CHROMA_PERSIST_DIR` | `vector_store.py` — RAG embeddings |
+| `GENERATED_FILES_DIR` | `generation/storage.py` — generated PDFs/images |
 | `RAG_SIMILARITY_THRESHOLD` | `rag_service.py` |
 | `API_KEY_ENCRYPTION_SECRET` | `key_encryption.py` |
 | `ALLOW_MOCK_LLM` | `model_clients.py` — mock when no key |
@@ -117,7 +120,7 @@ Example response:
 {
   "status": "ok",
   "service": "TokenMaxx",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "database": { "status": "ok" },
   "groq_configured": true
 }
@@ -170,6 +173,6 @@ pytest -v
 |-------|-----|
 | CORS errors in browser | Set `CORS_ORIGINS` to exact frontend URL (no trailing slash) |
 | 401 on all routes | Sign up/login again; ensure `JWT_SECRET` is stable across deploys |
-| Data lost after redeploy | Attach persistent disk + `DATABASE_URL=sqlite:////var/data/smartllm_router.db` + `CHROMA_PERSIST_DIR=/var/data/chroma` |
+| Data lost after redeploy | Attach persistent disk + `DATABASE_URL=sqlite:////var/data/smartllm_router.db` + `CHROMA_PERSIST_DIR=/var/data/chroma` + `GENERATED_FILES_DIR=/var/data/generated` |
 | Cold start slow (free tier) | First request after idle may take 30–60s |
 | Build fails | Confirm **Root Directory** is `backend` |

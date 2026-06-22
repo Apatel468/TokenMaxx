@@ -60,7 +60,9 @@ def test_db(tmp_path, monkeypatch):
 
     chroma_dir = tmp_path / "chroma"
     hf_cache = tmp_path / "hf_cache"
+    generated_dir = tmp_path / "generated"
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(chroma_dir))
+    monkeypatch.setenv("GENERATED_FILES_DIR", str(generated_dir))
     monkeypatch.setenv("HF_HOME", str(hf_cache))
     monkeypatch.setenv("SENTENCE_TRANSFORMERS_HOME", str(hf_cache))
     vector_store.reset_vector_store()

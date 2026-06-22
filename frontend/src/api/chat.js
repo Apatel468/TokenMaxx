@@ -66,7 +66,9 @@ function parseSseBuffer(buffer) {
  * @param {(data: object) => void} [params.onRoutingStart]
  * @param {(data: object) => void} [params.onRoutingComplete]
  * @param {(data: { content: string }) => void} [params.onToken]
- * @param {(data: object) => void} [params.onComplete]
+ * @param {(data: object) => void} [params.onGenerationStart]
+ * @param {(data: object) => void} [params.onGenerationProgress]
+ * @param {(data: object) => void} [params.onArtifact]
  * @param {(data: { message: string }) => void} [params.onError]
  */
 export async function streamChat({
@@ -76,6 +78,9 @@ export async function streamChat({
   onRoutingStart,
   onRoutingComplete,
   onToken,
+  onGenerationStart,
+  onGenerationProgress,
+  onArtifact,
   onComplete,
   onError,
 }) {
@@ -135,6 +140,15 @@ export async function streamChat({
           break;
         case "routing_complete":
           onRoutingComplete?.(data);
+          break;
+        case "generation_start":
+          onGenerationStart?.(data);
+          break;
+        case "generation_progress":
+          onGenerationProgress?.(data);
+          break;
+        case "artifact":
+          onArtifact?.(data);
           break;
         case "token":
           onToken?.(data);

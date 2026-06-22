@@ -98,7 +98,9 @@ Used by:
 - `http.js` → `authFetch` (most endpoints)
 - `auth.js` → signup/login
 - `chat.js` → SSE streaming
-- `documents.js` → RAG file upload/list/delete
+- `sentiment.js` → async sentiment analysis
+- `settings.js` → model-settings + provider-settings
+- `generations.js` → download/preview generated assets
 
 Default when unset: `http://127.0.0.1:8001` (local dev only).
 
@@ -115,10 +117,11 @@ npm run preview   # optional: test production build locally
 
 1. Open the preview URL → login/signup works.
 2. Browser DevTools → Network → API calls hit `VITE_API_BASE`, not localhost.
-3. Send a chat message → streaming response appears.
+3. Send a chat message → streaming response + sentiment panel updates.
 4. Documents tab → upload a file.
-5. Logs tab → recent activity events load.
-6. Analytics tab loads data.
+5. Model Controls → provider toggles visible (admin).
+6. Logs tab → recent activity events load.
+7. Analytics tab loads data.
 
 ---
 

@@ -1,13 +1,13 @@
 # TokenMaxx — System Design
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.6.0 · **Last updated:** June 2026
+> **Version:** 0.7.0 · **Last updated:** June 2026
 
 ---
 
 ## Problem
 
-Teams want LLM quality without always paying premium-model prices. TokenMaxx automatically picks the best model for each task across Groq, OpenAI, and Anthropic — favoring economy models for simple work and premium models when task bonuses and complexity warrant it — enhances prompts intelligently, grounds answers in uploaded documents, and proves savings with transparent routing metadata.
+Teams want LLM quality without always paying premium-model prices. TokenMaxx automatically picks the best model for each task across Groq, OpenAI, and Anthropic, enhances prompts intelligently, grounds answers in uploaded documents, generates files and images on demand, surfaces message sentiment for operators, and proves savings with transparent routing metadata.
 
 ---
 
@@ -16,33 +16,37 @@ Teams want LLM quality without always paying premium-model prices. TokenMaxx aut
 ### 1. Chat (streaming)
 
 1. User sends message in Chat tab
-2. Frontend calls `POST /chat/stream` (SSE)
-3. Backend: classify → enhance → **RAG retrieve** → route (provider-key filter) → stream tokens
-4. UI shows routing panel with provider availability, then token-by-token reply; RAG badge if documents used
-5. Assistant message persisted after stream completes
+2. Frontend fires `POST /sentiment/analyze` in parallel (non-blocking)
+3. Frontend calls `POST /chat/stream` (SSE)
+4. Backend: classify → intent → enhance → RAG → route → stream tokens (or generate file/image)
+5. UI: sentiment panel updates; routing panel; token-by-token reply; inline attachments for generations
 
-### 2. Document upload (RAG)
+### 2. Sentiment analysis
 
-1. User uploads TXT/MD/PDF in Documents tab
-2. Backend chunks, embeds, stores in ChromaDB; metadata in SQLite
-3. On next chat turn, relevant chunks injected into system prompt
+1. On each user message, frontend calls `POST /sentiment/analyze` asynchronously
+2. Panel shows label, confidence tier, explanation, conversation trend
+3. Result persisted to `message_sentiments` after chat turn completes
+4. **Does not** influence model routing or response content (extensible for future use)
 
-### 3. Model regenerate
+### 3. Document / image generation
 
-1. User clicks alternate model chip on assistant message
-2. `POST /chat/regenerate` — one sync LLM call with stored enhanced prompt
-3. Non-streaming; reuses routing context from original turn
+1. Intent detector routes document/image prompts away from normal chat stream
+2. Document: LLM generates content → rendered to PDF/DOCX/XLSX/PPTX/MD
+3. Image: DALL-E when `OPENAI_API_KEY` set; mock otherwise
+4. Artifact shown inline in chat with preview and download
 
-### 4. API keys
+### 4. Provider controls
 
-1. User adds provider key in Model Controls → encrypted in DB
-2. Chat/regenerate use user key first; fall back to app env key for that provider
-3. Test endpoint validates key against provider via LiteLLM
+1. Admin disables provider in Model Controls → `provider_settings` table
+2. All models from that provider become unavailable (`disabled_by_provider`)
+3. Router excludes them via `get_enabled_model_ids()`
+4. Users cannot re-enable provider-disabled models
 
-### 5. Activity logs
+### 5. Model regenerate
 
-1. Pipeline events written to `activity_logs` on each significant action
-2. Users see own logs; admins see all via `GET /admin/logs`
+1. User clicks alternate model chip
+2. `POST /chat/regenerate` — one sync LLM call
+3. Non-streaming; reuses stored enhanced prompt
 
 ---
 
@@ -51,85 +55,49 @@ Teams want LLM quality without always paying premium-model prices. TokenMaxx aut
 | Input | Source |
 |-------|--------|
 | Task type | `llm_classifier` or keyword fallback |
-| Complexity | `prompt_intelligence` (0–100 score) |
-| Model scores | `model_registry` editorial + `model_scorer` bonuses |
-| Provider filter | Only models whose provider has user or app API key |
-| Model filters | Admin disable, user disable, `MODEL_ALLOWLIST` |
+| Complexity | `prompt_intelligence` (0–100) |
+| Model scores | `model_registry` + `model_scorer` bonuses |
+| Provider filter | API keys + **provider_settings** |
+| Model filters | Admin disable, user disable, allowlist |
 
-Output: selected model + provider + top-5 candidates with scores and savings %.
-
-Task bonuses can steer complex business/coding/reasoning tasks toward premium OpenAI or Anthropic models when keys are configured.
+**Availability:** `provider_enabled AND admin_enabled AND user_enabled`
 
 ---
 
 ## Prompt Intelligence v2
 
-| Field | Description |
-|-------|-------------|
-| `task_type` | coding, business, creative, etc. |
-| `complexity_score` | 0–100 |
-| `complexity_level` | simple / medium / complex |
-| `persona` | Expert role for the model |
-| `enhancement_strategy` | minimal / structured / full |
-| `enhanced_prompt` | Clean text sent to LLM (no bracket notes) |
-
-Toggle: `enhance_prompts` in user preferences.
+Analyze then enhance by task, complexity, persona, and strategy. Toggle via `enhance_prompts` preference.
 
 ---
 
 ## RAG Design
 
-| Setting | Default |
-|---------|---------|
-| Top-K chunks | 3 |
-| Similarity threshold | 0.4 (`RAG_SIMILARITY_THRESHOLD`) |
-| Embedding model | `all-MiniLM-L6-v2` |
-| Scope | Per-user document collection |
-
-Response fields: `rag_used`, `retrieved_chunk_count`, `source_documents`, `source_filenames`.
+Top-3 chunks above similarity threshold 0.4; per-user ChromaDB collection; injected into system prompt.
 
 ---
 
 ## Cost Model
 
-- **Actual cost:** LiteLLM token usage × model price from registry (per provider)
-- **Premium baseline:** Same tokens × GPT-4o price
-- **Savings %:** `(premium - actual) / premium × 100`
-
-Stored per `model_run` (with `provider` column) and aggregated in Analytics (`/analytics/summary`, `/analytics/provider-usage`).
+Actual cost from LiteLLM usage × registry prices; premium baseline = GPT-4o; savings stored per `model_run`.
 
 ---
 
 ## Security
 
-| Concern | Approach |
-|---------|----------|
-| Auth | JWT (HS256), bcrypt passwords |
-| User API keys | Fernet encryption (`API_KEY_ENCRYPTION_SECRET`) |
-| Activity logs | Metadata only; keys never logged |
-| CORS | `CORS_ORIGINS` whitelist in production |
-| Admin | Role-based access on admin routes and `/admin/logs` |
-
----
-
-## Scalability Notes (MVP)
-
-- SQLite + local ChromaDB suit single-instance deploy
-- For multi-instance: migrate to Postgres + hosted vector DB
-- SSE requires sticky sessions or stateless stream design for horizontal scale
+JWT auth, Fernet-encrypted user API keys, sanitized activity logs, CORS whitelist, admin role on sensitive routes.
 
 ---
 
 ## Test Coverage
 
-85 pytest tests:
+| Suite | Count | Scope |
+|-------|-------|-------|
+| Backend pytest | 118 | Auth, chat, stream, routing, RAG, generation, sentiment, provider settings, API keys, analytics |
+| Frontend Vitest | 9 | SentimentPanel UI |
 
-- Auth, conversations, health
-- Chat sync + stream
-- Routing, provider routing, premium routing
-- Classifier, prompt intelligence
-- Documents + RAG in chat
-- API keys + activity logs
-- Model settings, provider analytics
+```bash
+cd backend && pytest -v
+cd frontend && npm test
+```
 
 LLM calls mocked in CI via `ALLOW_MOCK_LLM` and test fixtures.
