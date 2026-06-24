@@ -110,6 +110,17 @@ task_profiles:
       reasoning: 0.25
       writing: 0.65
 
+  web_research:
+    description: Live web search, current events, pricing, and fresh documentation.
+    task_match_weights:
+      coding: 0.10
+      reasoning: 0.45
+      writing: 0.45
+    preferred_models:
+      - openai/gpt-oss-120b
+      - llama-3.3-70b-versatile
+      - qwen/qwen3-32b
+
 # Map legacy analyzer outputs to task profile keys
 task_aliases:
   creative_writing: creative

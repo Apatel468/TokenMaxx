@@ -79,6 +79,12 @@ TASK_MODEL_BONUSES: dict[str, dict[str, float]] = {
         "openai/gpt-oss-120b": 12.0,
         "llama-3.3-70b-versatile": 7.0,
     },
+    "web_research": {
+        "openai/gpt-oss-120b": 18.0,
+        "llama-3.3-70b-versatile": 15.0,
+        "qwen/qwen3-32b": 12.0,
+        "llama-3.1-8b-instant": -6.0,
+    },
 }
 
 _COMPLEX_TASK_TYPES = frozenset(
@@ -91,6 +97,7 @@ _COMPLEX_TASK_TYPES = frozenset(
         "creative",
         "writing",
         "business",
+        "web_research",
     }
 )
 

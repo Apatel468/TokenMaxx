@@ -1,19 +1,19 @@
 # TokenMaxx — Project Memory
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.7.0 · **Last updated:** June 2026
+> **Version:** 0.8.0 · **Last updated:** June 2026
 
 ---
 
 ## What TokenMaxx Is
 
-TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams. It classifies each prompt, enhances it with Prompt Intelligence v2, optionally retrieves context from uploaded documents (RAG), routes to the best allowed model across Groq, OpenAI, and Anthropic, streams the answer live, generates documents and images inline in chat, analyzes user message sentiment asynchronously, and tracks savings vs. a GPT-4o baseline.
+TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams. It classifies each prompt, enhances it with Prompt Intelligence v2, optionally retrieves context from uploaded documents (RAG) and live web pages, routes to the best allowed model across Groq, OpenAI, and Anthropic, adapts response tone from sentiment, streams the answer live, generates documents and images inline in chat, and tracks savings vs. a GPT-4o baseline.
 
-**Stack:** FastAPI + SQLite + ChromaDB + React/Vite + LiteLLM (multi-provider) + JWT auth.
+**Stack:** FastAPI + SQLite + ChromaDB + React/Vite + LiteLLM (multi-provider) + Tavily/Serper + JWT auth.
 
 ---
 
-## Current State (v0.7.0)
+## Current State (v0.8.0)
 
 | Area | Status |
 |------|--------|
@@ -22,16 +22,18 @@ TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams.
 | Provider controls | Admin org-wide provider toggles (`provider_settings` table) |
 | Chat | Sync `POST /chat` + **SSE** `POST /chat/stream` (default UI) |
 | RAG | Document upload (TXT/MD/PDF), ChromaDB search, chat context injection |
+| Web research | Tavily/Serper search, HTML scraping, direct URLs, bot-block fallback |
 | Generation | Document (PDF, DOCX, XLSX, PPTX, MD) + image (DALL-E) inline in chat |
-| Sentiment | Real-time async panel; per-message storage; does not affect routing |
+| Sentiment panel | Real-time async UI; per-message storage |
+| Sentiment-aware chat | Tone guidance injected into system prompt (no routing change) |
 | Prompt Intelligence v2 | Analyze + enhance; complexity 0–100 |
-| Routing | LLM classifier + keyword fallback; task-aware scoring |
+| Routing | LLM classifier + keyword fallback; `web_research` task type |
 | Model Controls | Provider toggles + admin/user model toggles; API Keys (5 providers) |
 | Activity Logs | Backend event log; **Logs** tab |
 | Regenerate | One LLM call per model chip (non-streaming) |
 | Analytics | KPIs + model/provider breakdown + CSV export |
 | Admin | Employee usage dashboard |
-| Tests | **118** pytest + **9** Vitest (SentimentPanel) |
+| Tests | **152** pytest + **9** Vitest (SentimentPanel) |
 | Deploy | Render (backend) + Vercel (frontend) |
 
 ---
@@ -40,7 +42,7 @@ TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams.
 
 | Tab | Purpose |
 |-----|---------|
-| Chat | Streaming chat, sentiment panel, routing panel, generation attachments |
+| Chat | Streaming chat, sentiment panel, routing panel, web research badges, generation attachments |
 | Analytics | Usage KPIs, model/provider breakdown, CSV export |
 | Documents | Upload/manage RAG source files |
 | Logs | Activity log viewer |
@@ -53,25 +55,36 @@ TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams.
 
 | Module | Role |
 |--------|------|
-| `llm_classifier.py` | Groq task classification |
+| `llm_classifier.py` | Groq task classification (incl. `web_research`) |
 | `prompt_intelligence.py` | Analyze + enhance prompts (v2) |
 | `model_scorer.py` | Complexity-aware routing; provider-key filtering |
 | `model_registry.py` | Multi-provider allowlist + editorial scores |
 | `model_settings.py` | Admin/user model toggles + provider toggles |
-| `groq_models.py` | Model catalog sync |
 | `router_engine.py` | Score enabled models and pick best fit |
 | `model_clients.py` | LiteLLM generate/stream; per-provider API key resolution |
-| `chat_service.py` | Full chat pipeline (classify → enhance → RAG → route → respond) |
-| `generation/` | Intent detection, document writer, image generator |
-| `generation_service.py` | Orchestration + persistence for generated assets |
+| `chat_service.py` | Full chat pipeline |
+| `web_research_service.py` | Search, scrape, fallback, inject web context |
+| `web_search.py` | Tavily + Serper APIs |
+| `web_scraper.py` | httpx + BeautifulSoup page fetch |
+| `url_security.py` | SSRF protection, URL extraction |
+| `sentiment_context.py` | Sentiment → system prompt style instructions |
 | `sentiment_analyzer.py` | Rule-based sentiment classification |
 | `sentiment_service.py` | Per-message sentiment persistence |
+| `generation/` | Intent detection, document writer, image generator |
 | `rag_service.py` | Retrieve top chunks, inject into system prompt |
 | `vector_store.py` | ChromaDB persistence + similarity search |
-| `document_processor.py` | Chunk TXT/MD/PDF for embedding |
-| `api_key_service.py` | Encrypted per-user provider keys |
 | `activity_logger.py` | Structured event logging |
 | `report_generator.py` | Analytics summary, model/provider usage |
+
+---
+
+## Chat Pipeline (v0.8.0)
+
+```
+classify → enhance → RAG → web research → sentiment style → route → respond/generate
+```
+
+Web research triggers on: `web_research` task type, keywords (`latest`, `pricing`, etc.), or URLs in the prompt.
 
 ---
 
@@ -81,45 +94,47 @@ TokenMaxx is a **cost-optimized multi-provider LLM routing platform** for teams.
 available = provider_enabled AND admin_enabled AND user_enabled
 ```
 
-Provider toggles: `GET/PUT /provider-settings` (PUT admin only).
-
 ---
 
 ## API Key Resolution (chat + regenerate)
 
-Per provider:
+Per provider: **user key → app env key → mock**
 
-1. User's stored key for that provider (if set and active)
-2. App-level env key (`GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)
-3. Mock response if `ALLOW_MOCK_LLM=true` (default locally)
+Classifier, enhancer, title, and Groq model sync use app `.env` Groq key only.
 
-Classifier, enhancer, title, and Groq model sync use app `.env` keys only (Groq).
+Web search uses `TAVILY_API_KEY` or `SERPER_API_KEY` from app `.env`.
 
 ---
 
-## Sentiment Analysis
+## Web Research
 
-- Runs **asynchronously** via `POST /sentiment/analyze` (parallel to chat stream)
-- Does **not** block or alter chat routing or responses
-- Labels: positive, neutral, negative, excited, frustrated, confused, urgent
-- Stored in `message_sentiments`; shown in right-side **Sentiment Analysis** panel
-- Designed for future emotion/toxicity/mood analytics
+| Step | Behavior |
+|------|----------|
+| Direct URL | Scrape user-supplied URL (up to 5) |
+| Bot block | Search Tavily/Serper for alternates; skip blocked domain |
+| Scrape alternates | Fetch up to 5 pages; inject into system prompt |
+| Last resort | Use search snippets if scraping fails |
+| Security | SSRF blocks localhost/private IPs; timeout + size limits |
+
+Requires `TAVILY_API_KEY` (preferred) or `SERPER_API_KEY` for search and fallback.
 
 ---
 
-## Generation Pipeline
+## Sentiment
 
-1. `detect_generation_intent()` classifies prompt as chat, document, or image
-2. Document: LLM writes content → ReportLab/python-docx/etc. render file
-3. Image: DALL-E (OpenAI key) or mock placeholder
-4. Artifact attached inline to assistant message in chat (preview + download)
+| Layer | Behavior |
+|-------|----------|
+| Panel (UI) | Async `POST /sentiment/analyze` — parallel to chat stream |
+| Pipeline | Inline rule-based analysis → tone guidance in system prompt |
+| Routing | **Not** affected by sentiment |
+| Labels | positive, neutral, negative, excited, frustrated, confused, urgent |
 
 ---
 
 ## Tests
 
 ```bash
-cd backend && pytest -v          # 118 tests
+cd backend && pytest -v          # 152 tests
 cd frontend && npm test          # 9 Vitest tests
 ```
 
@@ -129,7 +144,6 @@ cd frontend && npm test          # 9 Vitest tests
 
 - **Backend:** Render — see [deploy-render.md](deploy-render.md)
 - **Frontend:** Vercel — see [deploy-vercel.md](deploy-vercel.md)
-- Cross-link: `VITE_API_BASE` ↔ `CORS_ORIGINS`
 
 ---
 

@@ -5,8 +5,11 @@ Shared chat pipeline helpers for POST /chat and POST /chat/stream.
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from database import User
 from models import ChatRequest, ChatResponse, ModelRecommendation, PromptAnalysisOut
@@ -28,9 +31,21 @@ from services.prompt_enhancer import format_enhanced_prompt_for_display
 from services.recommendations import build_top_recommendations
 from services.activity_logger import record_activity, with_request_meta
 from services.rag_service import apply_rag_to_context, rag_metadata_dict, retrieve_for_chat
+from services.web_research_service import (
+    apply_web_research_to_context,
+    retrieve_web_for_chat,
+    should_use_web_research,
+    web_research_metadata_dict,
+)
 from services.router_engine import RoutingDecision, route
 from services.context_builder import PromptContext
 from services.generation.intent import GenerationIntent, detect_generation_intent
+from services.sentiment_context import (
+    apply_sentiment_style_to_context,
+    resolve_sentiment_for_turn,
+    sentiment_metadata_dict,
+)
+from services.sentiment_service import save_message_sentiment
 from database import GeneratedDocument, GeneratedImage
 from models import GenerationArtifactOut
 from services.timezone_utils import format_timestamp_eastern
@@ -124,6 +139,63 @@ def prepare_chat_turn(
         ),
     )
 
+    sentiment_result = resolve_sentiment_for_turn(request.prompt)
+    if sentiment_result:
+        context = apply_sentiment_style_to_context(context, sentiment_result)
+        record_activity(
+            db,
+            user_id=user.id,
+            event_type="sentiment_style_applied",
+            message="Sentiment-aware style applied to system prompt.",
+            conversation_id=request.conversation_id,
+            metadata=with_request_meta(
+                request_id=request_id,
+                sentiment_label=sentiment_result.label,
+                sentiment_style_applied=context.sentiment_style_applied,
+            ),
+        )
+
+    if should_use_web_research(request.prompt, analysis.task_type):
+        record_activity(
+            db,
+            user_id=user.id,
+            event_type="web_research_started",
+            message="Web research started.",
+            conversation_id=request.conversation_id,
+            metadata=with_request_meta(
+                request_id=request_id,
+                task_type=analysis.task_type,
+            ),
+        )
+        web_result = retrieve_web_for_chat(
+            user.id,
+            request.prompt,
+            analysis.task_type,
+        )
+        if web_result.web_research_used or web_result.error_message:
+            if analysis.task_type != "web_research" and web_result.web_research_used:
+                context.task_type = "web_research"
+                analysis.task_type = "web_research"
+            context = apply_web_research_to_context(context, web_result)
+        record_activity(
+            db,
+            user_id=user.id,
+            event_type="web_research_completed",
+            message="Web research completed.",
+            conversation_id=request.conversation_id,
+            metadata=with_request_meta(
+                request_id=request_id,
+                web_research_used=web_result.web_research_used,
+                web_search_provider=web_result.search_provider,
+                web_source_count=len(web_result.sources),
+                web_scrape_duration_ms=round(web_result.scrape_duration_ms, 1),
+                web_search_query=web_result.search_query[:120] if web_result.search_query else "",
+                web_fallback_used=web_result.fallback_used,
+                web_fallback_reason=web_result.fallback_reason or None,
+                error=web_result.error_message or None,
+            ),
+        )
+
     enhancement_cost_saved = (
         0.0
         if request.enhance_prompt
@@ -210,7 +282,24 @@ def persist_chat_turn(
         rag_chunk_count=context.retrieved_chunk_count,
         rag_source_documents=context.source_documents,
         rag_source_filenames=context.source_filenames,
+        web_research_used=context.web_research_used,
+        web_search_query=context.web_search_query,
+        web_search_provider=context.web_search_provider,
+        web_sources=context.web_sources,
+        web_scrape_duration_ms=context.web_scrape_duration_ms,
     )
+    if context.sentiment_result is not None:
+        try:
+            save_message_sentiment(
+                db,
+                user_id=user.id,
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                result=context.sentiment_result,
+            )
+            db.commit()
+        except Exception as exc:
+            logger.warning("Could not persist sentiment for message %s: %s", user_message_id, exc)
     return conversation_id, title or "", user_message_id, assistant_message_id, costs
 
 
@@ -258,6 +347,8 @@ def build_routing_metadata(
         "routing_explanation": decision.routing_explanation,
         "prompt_analysis": prompt_analysis_to_out(context.prompt_analysis),
         **rag_metadata_dict(context),
+        **sentiment_metadata_dict(context),
+        **web_research_metadata_dict(context),
         "modality": generation_intent.modality,
         "generation_intent": {
             "modality": generation_intent.modality,
@@ -385,6 +476,8 @@ def build_chat_response(
         assistant_message_id=assistant_message_id,
         prompt_analysis=prompt_analysis_to_out(context.prompt_analysis),
         **rag_metadata_dict(context),
+        **sentiment_metadata_dict(context),
+        **web_research_metadata_dict(context),
         modality=modality,
         generation_artifact=artifact,
     )

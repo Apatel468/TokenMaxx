@@ -28,6 +28,7 @@ TASK_TYPES = [
     "report",
     "business",
     "classification",
+    "web_research",
 ]
 
 
@@ -87,6 +88,13 @@ _KEYWORD_RULES: dict[str, list[str]] = {
     "classification": [
         "classify", "categorize", "label", "tag", "sort into",
         "which category", "type of",
+    ],
+    "web_research": [
+        "latest", "current", "recent news", "pricing", "price", "cost per",
+        "today", "announcement", "competitor", "market research",
+        "company research", "enterprise plan", "release notes",
+        "what is the current", "as of today", "right now", "compare",
+        "versus", "documentation", "docs", "look up online",
     ],
     "general_qa": [
         "what is", "what are", "how does", "why", "explain", "define",

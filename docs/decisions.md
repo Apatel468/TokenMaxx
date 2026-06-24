@@ -1,7 +1,7 @@
 # TokenMaxx — Architectural Decisions
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.7.0 · **Last updated:** June 2026  
+> **Version:** 0.8.0 · **Last updated:** June 2026  
 > **Do not change items marked 🔒 without team review.**
 
 ---
@@ -13,119 +13,80 @@
 | Backend | FastAPI | OpenAPI, Pydantic, `StreamingResponse` for SSE |
 | Database | SQLite | Zero setup for MVP |
 | Vector store | ChromaDB + sentence-transformers | Local persistence; no external vector DB for MVP |
+| Web search | Tavily (preferred) + Serper fallback | Structured results with snippets for fallback |
+| Web scraping | httpx + BeautifulSoup | Python-native; static HTML extraction |
 | Auth | bcrypt + PyJWT (HS256) | Simple stateless tokens |
 | LLM gateway | LiteLLM | Unified multi-provider interface + `stream=True` |
 | Streaming | Server-Sent Events | `POST /chat/stream`; frontend uses fetch + ReadableStream |
 | Providers | Groq, OpenAI, Anthropic (allowlisted) | Cost/speed on Groq; premium tiers when keys configured |
 | Frontend | React + Vite | Fast iteration |
-| Tests | pytest + Vitest | 118 backend + 9 frontend tests; mocked LLM/stream in CI |
+| Tests | pytest + Vitest | 152 backend + 9 frontend tests; mocked LLM/search in CI |
 
 ---
 
 ## Architectural Decisions
 
 ### Multi-provider model allowlist (v0.6.0) 🔒
-**Decision:** Only models in `MODEL_ALLOWLIST` are synced, routed, and shown in Model Controls.  
-**Chat:** 11 models across Groq (6), OpenAI (3), Anthropic (2). **Audio:** `whisper-large-v3` only (not chat-routable).  
-**Routing:** Candidates filtered to providers with user or app API keys via `filter_candidates_by_provider_keys()`.  
-**Why:** Premium models for business/coding when warranted; economy Groq models for simple tasks.
-
-### Groq model allowlist (v0.3.2) 🔒
-**Decision:** `GROQ_MODEL_ALLOWLIST` is a subset of `MODEL_ALLOWLIST`. Groq-hosted models optionally synced against live Groq API.  
-**Superseded by:** Multi-provider allowlist (v0.6.0) — `GROQ_MODEL_ALLOWLIST` remains for Groq sync scope.
+11 chat models across Groq (6), OpenAI (3), Anthropic (2). Routing filtered to providers with API keys.
 
 ### SSE streaming chat (v0.4.0) 🔒
-**Decision:** `POST /chat/stream` returns `text/event-stream` with events: `routing_start`, `routing_complete`, `token`, `complete`, `error`.  
-**Frontend default:** `streamChat()` in `api/chat.js`; `POST /chat` kept for sync/tests.  
-**Persistence:** Assistant message saved only after stream completes.  
-**Fallback:** Word-by-word fake stream when provider streaming unavailable.  
-**Why:** Live token display for demos; routing metadata arrives before tokens.
+`POST /chat/stream` with `routing_complete` before tokens. Persistence after stream completes.
 
 ### Prompt Intelligence Engine v2 (v0.4.0) 🔒
-**Decision:** `prompt_intelligence.py` analyzes then enhances — not just rewrite.  
-**Outputs:** `PromptAnalysis` with task_type, complexity_score (0–100), complexity_level, persona, output_format, enhancement_strategy, enhanced_prompt.  
-**Complexity tiers:** simple → minimal; medium → structured; complex → full specification.  
-**Clean prompts:** No `[Original user request — preserve this intent: ...]` in stored or displayed text.  
-**Why:** Task- and complexity-aware enhancement; transparent metadata for demos.
+`prompt_intelligence.py` — analyze then enhance with complexity tiers and personas.
 
 ### RAG with ChromaDB (v0.5.0) 🔒
-**Decision:** Per-user document collections in ChromaDB; metadata in SQLite `uploaded_documents`.  
-**Pipeline:** After `build_context()` and before `route()` in `chat_service.prepare_chat_turn()`.  
-**Retrieval:** Top 3 chunks; cosine similarity threshold 0.4 (`RAG_SIMILARITY_THRESHOLD`).  
-**Injection:** Retrieved text prepended to system prompt via `rag_service.py`.  
-**Formats:** TXT, MD, PDF.  
-**Why:** Ground answers in user uploads without external vector DB cost.
+Per-user collections; top-3 chunks; threshold 0.4; injected into system prompt after enhancement.
 
 ### User API keys (v0.5.0) 🔒
-**Decision:** Users can store per-provider keys encrypted with Fernet (`API_KEY_ENCRYPTION_SECRET`).  
-**Supported providers:** groq, openai, anthropic, google, bedrock (placeholder).  
-**Resolution order (chat + regenerate):** user key → app env key → mock if `ALLOW_MOCK_LLM=true`.  
-**Not used for:** classifier, enhancer, title, Groq model sync (app `.env` Groq key only).  
-**Why:** BYOK for power users; app keys as fallback for demos.
-
-### Activity logs (v0.5.0)
-**Decision:** Structured events in `activity_logs` via `activity_logger.py`; metadata sanitized (no raw keys).  
-**Scope:** Chat pipeline, RAG, routing, model calls, login, document upload, API key CRUD.  
-**Access:** Users see own logs; admins see all via `GET /admin/logs`.  
-**Why:** Debuggability and demo transparency without log aggregation infra.
-
-### LLM task classifier (v0.3.3) 🔒
-**Decision:** `llm_classifier.py` + keyword fallback in `prompt_analyzer.py`.  
-**Note:** Classifier task types (routing) differ from enhancement task types (v2 normalization).
-
-### Task-aware routing (v0.3.3) 🔒
-**Decision:** Complexity-aware dynamic weights + `TASK_MODEL_BONUSES` in `model_scorer.py`.  
-**v0.6.0 extension:** Bonuses include OpenAI and Anthropic models for business, coding, and reasoning tasks.
-
-### Client-side analytics export (v0.3.3)
-**Decision:** `tokenmaxx-analytics-report.csv` from Analytics tab data; no dedicated export endpoint.
-
-### On-demand model regenerate (v0.3.2) 🔒
-**Decision:** One LLM call per chip click; reuses stored prompts; **non-streaming**.
-
-### Optional prompt enhancement (v0.3.2)
-**Decision:** User toggle `enhance_prompts`; when off, `build_disabled_analysis()` skips enhancer Groq call.
-
-### Two-tier model enable/disable (v0.3.1) 🔒
-**Rule (v0.7.0):** `available = provider_enabled AND admin_enabled AND user_enabled`  
-Provider toggles in `provider_settings` table; `GET/PUT /provider-settings` (PUT admin only).
+Fernet-encrypted per-provider keys. Resolution: user → env → mock.
 
 ### Provider-level controls (v0.7.0) 🔒
-**Decision:** Admins can disable entire providers (Groq, OpenAI, Anthropic) with one toggle.  
-**Effect:** All models from that provider excluded from routing; model toggles read-only with "Disabled by provider setting".  
-**Why:** Faster ops than disabling models one-by-one; mirrors cloud console patterns.
+`available = provider_enabled AND admin_enabled AND user_enabled`
 
-### Real-time sentiment analysis (v0.7.0)
-**Decision:** Async `POST /sentiment/analyze` runs parallel to chat; results in right panel + `message_sentiments` table.  
-**Does not affect:** Routing, prompt enhancement, or LLM responses (display + analytics only).  
-**Classifier:** Rule-based keyword patterns (7 labels + unknown); extensible for LLM/emotion/toxicity.  
-**Why:** Operator visibility without adding latency to chat pipeline.
+### Real-time sentiment panel (v0.7.0)
+Async `POST /sentiment/analyze` for UI panel + `message_sentiments` persistence.
+
+### Sentiment-aware response styling (v0.8.0)
+**Decision:** Inline rule-based sentiment in `prepare_chat_turn()` appends tone guidance to `system_prompt`.  
+**Does not affect:** Model routing or task classification.  
+**Mapping:** frustrated/negative → empathetic concise; confused → step-by-step; urgent → actionable steps.  
+**Why:** Improve UX without blocking streaming or adding LLM latency.
+
+### Web research & scraping (v0.8.0) 🔒
+**Decision:** Optional pipeline step after RAG, before routing in `chat_service.prepare_chat_turn()`.  
+**Search:** Tavily preferred, Serper fallback (`web_search.py`).  
+**Scrape:** httpx + BeautifulSoup (`web_scraper.py`); SSRF protection (`url_security.py`).  
+**Triggers:** `web_research` task type, keywords (`latest`, `pricing`, etc.), or URLs in prompt.  
+**Direct URLs:** Scrape up to 5; skip search API.  
+**Bot-protected fallback:** On scrape failure, search alternate sources (exclude blocked domain); last resort = search snippets only.  
+**Requires:** `TAVILY_API_KEY` or `SERPER_API_KEY` for search/fallback (direct scrape of friendly sites works without search key).  
+**Storage:** Web metadata on `model_runs`; sources in API response and conversation history.  
+**Why:** Answer questions requiring fresh web data without a separate research UI.
 
 ### Document & image generation (v0.7.0) 🔒
-**Decision:** Intent detection in `generation/intent.py` branches chat pipeline to document or image flows.  
-**Documents:** LLM writes content → ReportLab/python-docx/openpyxl/python-pptx render files.  
-**Images:** DALL-E via OpenAI key; mock placeholder without key.  
-**UX:** Inline attachments in chat (no separate Generations tab).  
-**Storage:** `generated_documents`, `generated_images` tables + `GENERATED_FILES_DIR`.
+Intent detection branches to document/image flows; inline chat attachments.
 
 ### Original prompt preserved in DB 🔒
-User `messages.content` = original text; `model_runs.enhanced_prompt` = clean enhanced text sent to model.
+User `messages.content` = original text; `model_runs.enhanced_prompt` = enhanced text sent to model.
 
 ---
 
 ## LLM Touchpoints (with API key)
 
-| Step | When | Model | Key source |
-|------|------|-------|------------|
-| Classify | Each chat turn | `llm_classifier` → llama-3.1-8b-instant | App `GROQ_API_KEY` |
+| Step | When | Model / service | Key source |
+|------|------|-----------------|------------|
+| Classify | Each chat turn | llama-3.1-8b-instant | App `GROQ_API_KEY` |
 | Analyze + enhance | Each turn (if enabled) | Prompt Intelligence v2 | App `GROQ_API_KEY` |
-| RAG embed/search | Upload + each chat turn | sentence-transformers + ChromaDB | N/A |
-| Route + respond | Each chat turn | Scored allowlisted model (any provider) | User key → env → mock |
-| Title | First turn | `auxiliary.title` | App `GROQ_API_KEY` |
-| Regenerate | User click only | User-selected model (sync) | User key → env → mock |
+| RAG embed/search | Upload + each turn | sentence-transformers + ChromaDB | N/A |
+| Web search | When web research triggers | Tavily / Serper API | `TAVILY_API_KEY` / `SERPER_API_KEY` |
+| Web scrape | When web research triggers | httpx (no LLM) | N/A |
+| Sentiment (pipeline) | Each chat turn | Rule-based (no LLM) | N/A |
+| Route + respond | Each chat turn | Scored allowlisted model | User key → env → mock |
+| Title | First turn | auxiliary.title | App `GROQ_API_KEY` |
 
 ---
 
 ## Registry Score Caveat
 
-Scores in `model_registry.py` are editorial estimates. Routing uses `model_scorer.py` bonuses; enhancement uses `prompt_intelligence.py` personas and strategies.
+Scores in `model_registry.py` are editorial estimates. Routing uses `model_scorer.py` bonuses; enhancement uses `prompt_intelligence.py` personas.

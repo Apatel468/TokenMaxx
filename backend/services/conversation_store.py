@@ -1,10 +1,8 @@
 """
 Conversation Store — read/write multi-turn conversations in SQLite (Phase 3A).
-
-Each conversation belongs to one user (user_id). Admins can access all threads
-via separate admin endpoints; regular users only see their own rows.
 """
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -26,6 +24,7 @@ from models import (
     MessageOut,
     PromptAnalysisOut,
     SentimentOut,
+    WebSourceOut,
 )
 from services.cost_tracker import CostEstimate
 from services.model_clients import ModelResponse
@@ -38,6 +37,11 @@ from services.rag_service import (
     deserialize_source_filenames,
     serialize_source_documents,
     serialize_source_filenames,
+)
+from services.web_research_service import (
+    WebSource,
+    deserialize_web_sources,
+    serialize_web_sources,
 )
 
 ROUTER_LABEL = "Router Selected"
@@ -124,6 +128,25 @@ def _rag_for_assistant(db: Session, message: Message) -> tuple[bool, list[str]]:
         return False, []
 
     return True, deserialize_source_filenames(run.rag_source_filenames)
+
+
+def _web_research_for_assistant(
+    db: Session, message: Message
+) -> tuple[bool, list[dict], str]:
+    """Return (web_research_used, web_sources, search_query) for an assistant turn."""
+    if message.role != "assistant":
+        return False, [], ""
+
+    run = (
+        db.query(ModelRun)
+        .filter(ModelRun.assistant_message_id == message.id)
+        .first()
+    )
+    if not run or not run.web_research_used:
+        return False, [], ""
+
+    sources = deserialize_web_sources(run.web_sources_json)
+    return True, sources, run.web_search_query or ""
 
 
 def _prompt_enhancement_for_assistant(
@@ -377,6 +400,11 @@ def save_chat_turn(
     rag_chunk_count: int = 0,
     rag_source_documents: list[int] | None = None,
     rag_source_filenames: list[str] | None = None,
+    web_research_used: bool = False,
+    web_search_query: str = "",
+    web_search_provider: str = "",
+    web_sources: list[WebSource] | None = None,
+    web_scrape_duration_ms: float = 0.0,
     content_type: str = "text",
     generation_artifact_type: str | None = None,
     generation_artifact_id: int | None = None,
@@ -458,6 +486,16 @@ def save_chat_turn(
         rag_chunk_count=rag_chunk_count or None,
         rag_source_documents=serialize_source_documents(rag_source_documents or []),
         rag_source_filenames=serialize_source_filenames(rag_source_filenames or []),
+        web_research_used=web_research_used,
+        web_search_query=web_search_query or None,
+        web_search_provider=web_search_provider or None,
+        web_source_urls=json.dumps([s.url for s in (web_sources or [])]) if web_sources else None,
+        web_source_titles=serialize_source_filenames(
+            [s.title for s in (web_sources or []) if s.title]
+        ),
+        web_sources_json=serialize_web_sources(web_sources or []),
+        web_scrape_duration_ms=web_scrape_duration_ms or None,
+        web_source_count=len(web_sources or []) or None,
     )
     db.add(model_run)
 
@@ -530,6 +568,7 @@ def get_conversation_detail(
         )
         prompt_analysis = _prompt_analysis_for_assistant(db, m)
         rag_used, source_filenames = _rag_for_assistant(db, m)
+        web_used, web_sources, web_query = _web_research_for_assistant(db, m)
         sentiment = _sentiment_for_user_message(db, m)
         message_rows.append(
             MessageOut(
@@ -545,6 +584,9 @@ def get_conversation_detail(
                 prompt_analysis=prompt_analysis,
                 rag_used=rag_used,
                 source_filenames=source_filenames,
+                web_research_used=web_used,
+                web_sources=[WebSourceOut(**src) for src in web_sources],
+                web_search_query=web_query,
                 generation_artifact=_artifact_for_message(db, m),
                 created_at=format_timestamp_eastern(m.created_at),
                 sentiment=sentiment,

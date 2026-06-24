@@ -210,6 +210,15 @@ class ChatRequest(BaseModel):
     )
 
 
+class WebSourceOut(BaseModel):
+    """A web page used as research context for a chat turn."""
+
+    url: str
+    title: str = ""
+    snippet: str = ""
+    word_count: int = 0
+
+
 class ChatResponse(BaseModel):
     """What the server returns after routing and generating a response."""
 
@@ -335,6 +344,58 @@ class ChatResponse(BaseModel):
     source_filenames: list[str] = Field(
         default_factory=list,
         description="Filenames of documents used as RAG context.",
+    )
+    sentiment_label: str = Field(
+        default="",
+        description="Detected user message sentiment label for this turn.",
+    )
+    sentiment_style_applied: bool = Field(
+        default=False,
+        description="True when tone guidance was injected into the system prompt.",
+    )
+    web_research_used: bool = Field(
+        default=False,
+        description="True when live web content was injected into context.",
+    )
+    web_search_query: str = Field(
+        default="",
+        description="Search query used for web research (empty for direct URLs).",
+    )
+    web_search_provider: str = Field(
+        default="",
+        description='Search provider: "tavily", "serper", or "direct".',
+    )
+    web_scrape_duration_ms: float = Field(
+        default=0.0,
+        description="Total time spent searching and scraping (milliseconds).",
+    )
+    web_source_count: int = Field(
+        default=0,
+        description="Number of web sources used in the response.",
+    )
+    web_sources: list[WebSourceOut] = Field(
+        default_factory=list,
+        description="Web pages scraped or cited for this reply.",
+    )
+    web_research_error: str = Field(
+        default="",
+        description="User-facing error when web research partially or fully failed.",
+    )
+    web_research_direct_urls: bool = Field(
+        default=False,
+        description="True when the user supplied URLs directly (search skipped).",
+    )
+    web_fallback_used: bool = Field(
+        default=False,
+        description="True when alternate sources were used after the original link failed.",
+    )
+    web_fallback_reason: str = Field(
+        default="",
+        description='Why fallback ran, e.g. "direct_scrape_blocked".',
+    )
+    web_original_blocked_urls: list[str] = Field(
+        default_factory=list,
+        description="User URLs that could not be scraped before fallback.",
     )
     modality: str = Field(
         default="chat",
@@ -642,6 +703,18 @@ class MessageOut(BaseModel):
     source_filenames: list[str] = Field(
         default_factory=list,
         description="Uploaded document filenames used as RAG context.",
+    )
+    web_research_used: bool = Field(
+        default=False,
+        description="True when live web content was used for this assistant reply.",
+    )
+    web_sources: list[WebSourceOut] = Field(
+        default_factory=list,
+        description="Web pages used as research context.",
+    )
+    web_search_query: str = Field(
+        default="",
+        description="Search query used for web research.",
     )
     generation_artifact: GenerationArtifactOut | None = Field(
         default=None,

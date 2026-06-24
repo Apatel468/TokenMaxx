@@ -1,9 +1,9 @@
 # TokenMaxx — Demo Script
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.7.0
+> **Version:** 0.8.0
 
-Use this script to demo TokenMaxx to stakeholders in 28–35 minutes.
+Use this script to demo TokenMaxx to stakeholders in 30–40 minutes.
 
 ---
 
@@ -14,16 +14,18 @@ Use this script to demo TokenMaxx to stakeholders in 28–35 minutes.
 3. Open http://localhost:5173
 4. Set API keys in `backend/.env`:
    - `GROQ_API_KEY` — classifier, enhancer, Groq models, document content
+   - `TAVILY_API_KEY` — web research (keys start with `tvly-`; get at app.tavily.com)
    - `OPENAI_API_KEY` — optional; GPT-4o routing + DALL-E images
    - `ANTHROPIC_API_KEY` — optional; Claude routing
 5. Set `JWT_SECRET`
-6. (Optional) Upload a sample file in **Documents** for RAG demo
+6. **Restart backend** after any `.env` change
+7. (Optional) Upload a sample file in **Documents** for RAG demo
 
 ---
 
 ## Act 1 — Intro & Login (1 minute)
 
-> "TokenMaxx classifies each prompt, enhances it, retrieves document context, routes across Groq, OpenAI, and Anthropic, streams answers live, generates files inline, and shows real-time sentiment — all while tracking savings vs. premium."
+> "TokenMaxx classifies each prompt, enhances it, retrieves document and web context, routes across three providers, adapts tone from sentiment, streams answers live, and tracks savings vs. premium."
 
 1. Sign up or log in
 2. Session persists across refresh (JWT)
@@ -35,73 +37,101 @@ Use this script to demo TokenMaxx to stakeholders in 28–35 minutes.
 **Prompt:** `Thanks for the help — what is photosynthesis?`
 
 Watch:
-- **Sentiment Analysis** panel (right) → likely **Positive** / Mid confidence
-- Assistant reply streams token-by-token
-- **Latest Routing** panel below sentiment → task, model, savings
+- **Sentiment Analysis** panel → likely **Positive**
+- Assistant streams token-by-token
+- **Latest Routing** panel → task, model, savings
 
 **Prompt:** `I'm frustrated — this still isn't working!`
 
-- Sentiment → **Frustrated**
-- Chat still responds normally (sentiment does not change routing)
+- Sentiment panel → **Frustrated**
+- Routing panel may show **Sentiment-aware response**
+- Reply should be more direct/empathetic (tone guidance in system prompt)
 
 ---
 
-## Act 3 — Task-Aware Routing (4 minutes)
+## Act 3 — Web Research (5 minutes)
 
-| Prompt | Expected model |
-|--------|----------------|
-| `Debug this React hooks error` | qwen3-32b or premium if keys set |
-| `Write a Q3 business report` | Claude/GPT-4o or llama-3.3-70b |
-| `URGENT: need this fixed by EOD` | Sentiment: **Urgent**; routing per task |
+### Friendly URL (direct scrape)
+
+**Prompt:**
+```
+Summarize https://en.wikipedia.org/wiki/2026_24_Hours_of_Le_Mans
+```
+
+Watch:
+- **🌐 Web Research** badge
+- Clickable source link
+- Summary grounded in page content
+
+Check **Logs** → `web_research_completed` with `web_research_used: true`
+
+### Search-based research
+
+**Prompt:** `What is OpenAI's latest API pricing?`
+
+- Task type may be `web_research`
+- Sources from Tavily search + scrape
+
+### Bot-protected URL (fallback)
+
+**Prompt:**
+```
+Describe this product and give me the price:
+https://www.sephora.com/product/pretty-grunge-eyeshadow-palette-P507079
+```
+
+Watch:
+- **Alternate sources (original link blocked)** badge
+- `web_fallback_used: true` in activity log
+- Answer cites alternate retailers/review sites (not Sephora directly)
+
+> Requires valid `TAVILY_API_KEY` and backend restart after adding it.
 
 ---
 
-## Act 4 — Prompt Intelligence v2 (2 minutes)
+## Act 4 — Task-Aware Routing (3 minutes)
+
+| Prompt | Expected behavior |
+|--------|-------------------|
+| `Debug this React hooks error` | Coding task; qwen3-32b or premium |
+| `Write a Q3 business report` | Business/report; Claude/GPT-4o bias |
+| `URGENT: need this fixed by EOD` | Urgent sentiment + concise routing |
+
+---
+
+## Act 5 — Prompt Intelligence v2 (2 minutes)
 
 Expand **View Prompt Optimization** — task, complexity, persona, strategy, enhanced prompt.
 
 ---
 
-## Act 5 — RAG Documents (3 minutes)
+## Act 6 — RAG Documents (3 minutes)
 
 1. Upload FAQ/spec in **Documents**
 2. Ask a question only answerable from that file
-3. Show **Document Context Used** badge in routing panel
+3. Show **Document Context Used** badge
 
 ---
 
-## Act 6 — Document & Image Generation (3 minutes)
+## Act 7 — Document & Image Generation (3 minutes)
 
 **Document:** `Create a one-page PDF report on renewable energy trends`
 
-- Shows generation progress in chat
-- Inline PDF attachment with preview/download
-
 **Image:** `Generate a simple architecture diagram for a web app`
 
-- Inline image attachment (DALL-E if OpenAI key set)
+---
+
+## Act 8 — Provider Controls (2 minutes)
+
+1. **Model Controls** → disable **Groq**
+2. Send chat → router picks OpenAI/Anthropic
+3. Re-enable Groq
 
 ---
 
-## Act 7 — Provider Controls (2 minutes)
+## Act 9 — Logs & Analytics (2 minutes)
 
-1. Open **Model Controls** (admin account)
-2. **Providers** section — disable **Groq** with one toggle
-3. All Groq models grey out: "Disabled by provider setting"
-4. Send chat message — router picks OpenAI/Anthropic (if keys set)
-5. Re-enable Groq and save
-
----
-
-## Act 8 — Model Regenerate (2 minutes)
-
-Click alternate model chip → one API call, non-streaming reply.
-
----
-
-## Act 9 — Activity Logs & Analytics (2 minutes)
-
-- **Logs** tab — routing, RAG, generation events
+- **Logs** — `web_research_started/completed`, routing, RAG events
 - **Analytics** — KPIs, model/provider breakdown, CSV export
 
 ---
@@ -110,14 +140,23 @@ Click alternate model chip → one API call, non-streaming reply.
 
 http://127.0.0.1:8001/docs
 
-- `POST /chat/stream` — SSE
-- `POST /sentiment/analyze` — async sentiment
-- `GET/PUT /provider-settings` — provider toggles
-- `POST /documents/upload` — RAG
-- `GET /generations/...` — download generated assets
+- `POST /chat/stream` — SSE with web research metadata
+- `POST /sentiment/analyze`
+- `POST /documents/upload`
 
 ---
 
 ## Closing
 
-> "TokenMaxx routes eleven models across three providers with provider-level admin controls, enhances prompts intelligently, grounds answers in your documents, streams live, generates PDFs and images inline, surfaces sentiment in real time, logs every step, and proves cost savings on every request."
+> "TokenMaxx routes eleven models across three providers, enhances prompts, grounds answers in your documents and live web sources, adapts tone from sentiment, streams live, generates files inline, logs every step, and proves cost savings on every request."
+
+---
+
+## Troubleshooting during demo
+
+| Issue | Fix |
+|-------|-----|
+| Web research fails on Sephora | Expected without Tavily key; add `TAVILY_API_KEY` and restart |
+| `Unable to retrieve web search results` | Wrong API key format (must be `tvly-`, not You.com `ydc-sk-`) |
+| No web research badge | Check Logs for `web_research_used`; restart backend after `.env` change |
+| Wikipedia works, Sephora doesn't | Bot protection — fallback needs Tavily |

@@ -1,37 +1,41 @@
 # TokenMaxx — Roadmap
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.7.0 · **Last updated:** June 2026
+> **Version:** 0.8.0 · **Last updated:** June 2026
 
 ---
 
 ## Completed Milestones
 
 ### M1–M21
-- [x] MVP through multi-provider routing (v0.6.0) — see prior releases in git history
+- [x] MVP through multi-provider routing (v0.6.0)
 
 ### M22 — Sentiment, Provider Controls & Generation (v0.7.0)
-- [x] Real-time sentiment analysis panel (async, non-blocking)
-- [x] `message_sentiments` table + `POST /sentiment/analyze` API
-- [x] Provider-level admin toggles (`provider_settings` table)
-- [x] `GET/PUT /provider-settings`; availability = provider ∧ admin ∧ user
-- [x] Model Controls UI grouped by provider with model counts
-- [x] Document generation (PDF, DOCX, XLSX, PPTX, MD) inline in chat
-- [x] Image generation (DALL-E / mock) inline in chat
-- [x] Generation intent detection + `generations` router (download, preview, history)
-- [x] Analytics model usage table layout fixes
-- [x] Frontend Vitest suite (SentimentPanel)
-- [x] Tests: `test_sentiment.py`, `test_provider_settings.py`, `test_generation_*.py`
+- [x] Real-time sentiment analysis panel
+- [x] Provider-level admin toggles
+- [x] Document + image generation inline in chat
+- [x] Analytics layout fixes; Vitest suite
+
+### M23 — Web Research & Sentiment Pipeline (v0.8.0)
+- [x] Web research task type + keyword/URL detection
+- [x] Tavily + Serper search integration
+- [x] HTML scraping with SSRF protection
+- [x] Bot-protected URL → search fallback to alternate sources
+- [x] Web research UI badges + source links in chat
+- [x] Web metadata on `model_runs` + activity logs
+- [x] Sentiment-aware response styling in chat pipeline
+- [x] Tests: `test_web_research.py`, `test_sentiment_context.py`, `test_url_security.py`
 
 ---
 
 ## Current Milestone
 
-**M23 — Production Hardening & Sentiment Integration**
+**M24 — Production Hardening & Research Quality**
 
 | Task | Status |
 |------|--------|
-| Wire sentiment into routing / prompt tone (optional) | ⬜ |
+| You.com / additional search providers | ⬜ |
+| Headless browser for JS-heavy retail sites | ⬜ |
 | Sentiment analytics dashboard | ⬜ |
 | User API keys for classifier/enhancer | ⬜ |
 | Persistent ChromaDB + generated files on Render disk | ⬜ |
@@ -39,7 +43,6 @@
 | Mobile layout | ⬜ |
 | Streaming regenerate | ⬜ |
 | Google Gemini chat models in catalog | ⬜ |
-| Emotion / toxicity scoring | ⬜ |
 
 ---
 
@@ -52,7 +55,7 @@
 
 ## Production Readiness
 
-**Current score:** ~90% production ready
+**Current score:** ~92% production ready
 
 | Area | Status |
 |------|--------|
@@ -60,12 +63,13 @@
 | Prompt Intelligence | ✅ v2 analyze + enhance |
 | Streaming chat | ✅ SSE `/chat/stream` |
 | RAG | ✅ Document upload + chat context |
-| Generation | ✅ Documents + images inline in chat |
-| Sentiment | ✅ Real-time panel + persistence (display-only) |
+| Web research | ✅ Search + scrape + fallback (needs Tavily/Serper key) |
+| Generation | ✅ Documents + images inline |
+| Sentiment | ✅ Panel + pipeline tone guidance |
 | Provider controls | ✅ One-click provider disable |
 | User API keys | ✅ Encrypted per-provider resolution |
-| Activity logs | ✅ Pipeline + admin viewer |
+| Activity logs | ✅ Full pipeline visibility |
 | Authentication | ✅ JWT + roles |
-| Analytics | ✅ KPIs + model/provider breakdown + CSV |
-| Tests | ✅ 118 pytest + 9 Vitest |
+| Analytics | ✅ KPIs + breakdown + CSV |
+| Tests | ✅ 152 pytest + 9 Vitest |
 | Deploy | ✅ Render + Vercel guides |

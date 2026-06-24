@@ -51,7 +51,7 @@ from routers import (
 from services.groq_models import sync_groq_catalog
 
 TAGLINE = "Maximum Intelligence, Minimum Cost"
-API_VERSION = "0.7.0"
+API_VERSION = "0.8.0"
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",

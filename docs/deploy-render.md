@@ -71,6 +71,10 @@ The blueprint provisions:
 | `CHROMA_PERSIST_DIR` | No | RAG vector store path (use `/var/data/chroma` with disk) |
 | `GENERATED_FILES_DIR` | No | Generated documents/images (use `/var/data/generated` with disk) |
 | `RAG_SIMILARITY_THRESHOLD` | No | Default `0.4` |
+| `TAVILY_API_KEY` | No | Web search for live research (keys start with `tvly-`) |
+| `SERPER_API_KEY` | No | Web search fallback if Tavily unavailable |
+| `WEB_SCRAPE_TIMEOUT_SEC` | No | Per-page scrape timeout (default `15`) |
+| `WEB_SCRAPE_MAX_BYTES` | No | Max page download size (default `2097152`) |
 | `ALLOW_MOCK_LLM` | No | Default `true`; set `false` in production |
 
 4. **Persistent disk** (recommended):
@@ -103,6 +107,10 @@ All secrets are read from `os.environ` (set in Render dashboard or `render.yaml`
 | `CHROMA_PERSIST_DIR` | `vector_store.py` — RAG embeddings |
 | `GENERATED_FILES_DIR` | `generation/storage.py` — generated PDFs/images |
 | `RAG_SIMILARITY_THRESHOLD` | `rag_service.py` |
+| `TAVILY_API_KEY` | `web_search.py` — Tavily web search |
+| `SERPER_API_KEY` | `web_search.py` — Serper fallback |
+| `WEB_SCRAPE_TIMEOUT_SEC` | `web_scraper.py` |
+| `WEB_SCRAPE_MAX_BYTES` | `web_scraper.py` |
 | `API_KEY_ENCRYPTION_SECRET` | `key_encryption.py` |
 | `ALLOW_MOCK_LLM` | `model_clients.py` — mock when no key |
 
@@ -120,7 +128,7 @@ Example response:
 {
   "status": "ok",
   "service": "TokenMaxx",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "database": { "status": "ok" },
   "groq_configured": true
 }
@@ -175,4 +183,6 @@ pytest -v
 | 401 on all routes | Sign up/login again; ensure `JWT_SECRET` is stable across deploys |
 | Data lost after redeploy | Attach persistent disk + `DATABASE_URL=sqlite:////var/data/smartllm_router.db` + `CHROMA_PERSIST_DIR=/var/data/chroma` + `GENERATED_FILES_DIR=/var/data/generated` |
 | Cold start slow (free tier) | First request after idle may take 30–60s |
+| Web research fails / no fallback | Set `TAVILY_API_KEY` (must start with `tvly-`); restart service after env change |
+| `Unable to retrieve web search results` | Invalid Tavily key — do not use You.com (`ydc-sk-`) keys in `TAVILY_API_KEY` |
 | Build fails | Confirm **Root Directory** is `backend` |

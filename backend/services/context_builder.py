@@ -40,6 +40,21 @@ class PromptContext:
     retrieved_chunk_count: int = 0
     source_documents: list[int] = field(default_factory=list)
     source_filenames: list[str] = field(default_factory=list)
+    # Sentiment-aware response styling (injected into system_prompt)
+    sentiment_label: str | None = None
+    sentiment_style_applied: bool = False
+    sentiment_result: object | None = None  # SentimentResult when resolved
+    # Web research — live search + scrape metadata (injected into system_prompt)
+    web_research_used: bool = False
+    web_search_query: str = ""
+    web_search_provider: str = ""
+    web_scrape_duration_ms: float = 0.0
+    web_sources: list = field(default_factory=list)  # WebSource objects
+    web_research_error: str = ""
+    web_research_direct_urls: bool = False
+    web_fallback_used: bool = False
+    web_fallback_reason: str = ""
+    web_original_blocked_urls: list = field(default_factory=list)
 
 
 _CHARS_PER_TOKEN = 4

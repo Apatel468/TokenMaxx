@@ -36,6 +36,7 @@ SUPPORTED_TASK_TYPES: frozenset[str] = frozenset(
         "creative",
         "report",
         "classification",
+        "web_research",
     }
 )
 

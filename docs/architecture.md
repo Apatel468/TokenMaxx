@@ -1,7 +1,7 @@
 # TokenMaxx — Architecture
 
 > **Tagline:** Maximum Intelligence, Minimum Cost  
-> **Version:** 0.7.0 · **Last updated:** June 2026
+> **Version:** 0.8.0 · **Last updated:** June 2026
 
 ---
 
@@ -10,30 +10,30 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                     React Frontend (Vite)                             │
-│  Chat (sentiment + routing panels) │ Analytics │ Documents │ Logs    │
-│  Model Controls │ Admin                                              │
+│  Chat (sentiment + routing + web research) │ Analytics │ Documents   │
+│  Logs │ Model Controls │ Admin                                        │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │ REST + SSE
 ┌────────────────────────────▼─────────────────────────────────────────┐
-│                     FastAPI Backend                                   │
+│                     FastAPI Backend (v0.8.0)                          │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────────┐   │
-│  │   Auth   │ │   Chat   │ │ Documents│ │ Sentiment + Provider │   │
-│  │  (JWT)   │ │ + Stream │ │  + RAG   │ │ Settings + Generation│   │
+│  │   Auth   │ │   Chat   │ │ Documents│ │ Sentiment + Web      │   │
+│  │  (JWT)   │ │ + Stream │ │  + RAG   │ │ Research + Generation│   │
 │  └──────────┘ └────┬─────┘ └────┬─────┘ └──────────────────────┘   │
 │                    │            │                                     │
 │  ┌─────────────────▼────────────▼──────────────────────────────┐   │
 │  │              Chat Pipeline (chat_service)                      │   │
-│  │  classify → intent → enhance → RAG → route → respond/generate  │   │
+│  │  classify → enhance → RAG → web research → sentiment → route   │   │
 │  └─────────────────┬──────────────────────────────────────────────┘   │
 │                    │                                                  │
-│  ┌─────────────────▼──────────┐  ┌──────────────────────────┐       │
-│  │  LiteLLM → Groq / OpenAI   │  │  ChromaDB (vector_store) │       │
-│  │           / Anthropic       │  │                          │       │
-│  └────────────────────────────┘  └──────────────────────────┘       │
+│  ┌─────────────────▼──────────┐  ┌────────────┐  ┌──────────────┐   │
+│  │  LiteLLM → Groq/OpenAI/    │  │  ChromaDB  │  │ Tavily/Serper│   │
+│  │           Anthropic          │  │  (RAG)     │  │ + web scraper│   │
+│  └────────────────────────────┘  └────────────┘  └──────────────┘   │
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │  SQLite — users, conversations, messages, model_runs,           │   │
-│  │  provider_settings, message_sentiments, generated_documents,    │   │
-│  │  uploaded_documents, user_api_keys, activity_logs               │   │
+│  │  provider_settings, message_sentiments, web research metadata,  │   │
+│  │  generated_documents, uploaded_documents, activity_logs         │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -44,37 +44,30 @@
 
 ```
 backend/
-├── main.py                 # FastAPI app, CORS, routers (v0.7.0)
+├── main.py                 # FastAPI app, CORS, routers (v0.8.0)
 ├── database.py             # SQLAlchemy models + migrations
 ├── config/
 │   ├── model_registry.py   # Multi-provider allowlist + scores
-│   └── models.yaml         # Task profiles and scoring weights
+│   └── models.yaml         # Task profiles (incl. web_research)
 ├── routers/
-│   ├── auth.py
 │   ├── chat.py             # /chat, /chat/stream, /chat/regenerate
-│   ├── conversations.py
-│   ├── analytics.py
-│   ├── model_settings_route.py   # GET/PUT /model-settings
-│   ├── provider_settings.py    # GET/PUT /provider-settings
-│   ├── sentiment.py            # POST /sentiment/analyze, history
-│   ├── generations.py          # download, preview, history
+│   ├── sentiment.py        # POST /sentiment/analyze, history
+│   ├── provider_settings.py
+│   ├── generations.py
 │   ├── documents.py
-│   ├── user_api_keys.py
-│   ├── logs.py
-│   └── admin.py
+│   └── ...
 ├── services/
 │   ├── chat_service.py
-│   ├── router_engine.py
-│   ├── model_settings.py       # Model + provider availability
-│   ├── generation/             # intent, document_writer, image_generator
-│   ├── generation_service.py
-│   ├── sentiment_analyzer.py
-│   ├── sentiment_service.py
+│   ├── web_research_service.py
+│   ├── web_search.py
+│   ├── web_scraper.py
+│   ├── url_security.py
+│   ├── content_cleaner.py
+│   ├── sentiment_context.py
 │   ├── rag_service.py
-│   ├── vector_store.py
-│   ├── model_clients.py
+│   ├── router_engine.py
 │   └── ...
-└── tests/                  # 118 tests
+└── tests/                  # 152 tests
 ```
 
 ---
@@ -84,33 +77,53 @@ backend/
 ```
 User message
     │
-    ├─► POST /sentiment/analyze (async, parallel — UI only)
+    ├─► POST /sentiment/analyze (async, parallel — UI panel)
     │
     ▼
-build_context()          ← conversation history
+analyze_prompt()           ← llm_classifier or keyword fallback
     │
     ▼
-classify_task()          ← llm_classifier or keyword fallback
+detect_generation_intent() ← chat | document | image
     │
     ▼
-detect_generation_intent()  ← chat | document | image
-    │
-    ├─ document/image → generation_service (skip token stream)
+build_context()            ← Prompt Intelligence v2 (if enabled)
     │
     ▼
-analyze_and_enhance()    ← prompt_intelligence v2 (if enabled)
+retrieve_for_chat()        ← RAG top-3 chunks (ChromaDB)
     │
     ▼
-retrieve_rag_context()   ← ChromaDB top-3 chunks
+retrieve_web_for_chat()    ← search + scrape OR direct URL
+    │                         fallback if bot-protected
+    ▼
+resolve_sentiment_for_turn() ← tone guidance → system prompt
     │
     ▼
-route()                  ← enabled models (provider + admin + user)
+route()                    ← enabled models (provider ∧ admin ∧ user)
     │
     ▼
-generate / stream        ← model_clients
+generate / stream          ← model_clients (LiteLLM)
     │
     ▼
-persist + analytics + activity log + sentiment store
+persist + activity log + analytics
+```
+
+---
+
+## Web Research Flow
+
+```
+Trigger: web_research task | keywords | URL in prompt
+    │
+    ├─ URLs in prompt? ──► scrape direct (skip search)
+    │       │
+    │       └─ fail + TAVILY/SERPER set? ──► search fallback
+    │
+    └─ no URL ──► Tavily/Serper search ──► scrape top URLs
+            │
+            └─ scrape fail ──► inject search snippets
+    │
+    ▼
+Inject into system_prompt with citation instructions
 ```
 
 ---
@@ -121,19 +134,6 @@ persist + analytics + activity log + sentiment store
 enabled = provider_enabled AND admin_enabled AND user_enabled
 ```
 
-`get_enabled_model_ids()` in `model_settings.py` gates `router_engine.route()`.
-
----
-
-## Model Catalog
-
-| Provider | Chat models | Notes |
-|----------|-------------|-------|
-| Groq | 6 models | Synced against live Groq API when `GROQ_API_KEY` set |
-| OpenAI | gpt-4o-mini, gpt-4o, o3-mini | Registry metadata |
-| Anthropic | claude-3-5-sonnet, claude-3-haiku | Registry metadata |
-| Audio | whisper-large-v3 | Cataloged; not chat-routable |
-
 ---
 
 ## Frontend Structure
@@ -142,18 +142,17 @@ enabled = provider_enabled AND admin_enabled AND user_enabled
 frontend/src/
 ├── App.jsx
 ├── components/
-│   ├── ChatPage.jsx        # 3-column: sidebar | thread | sentiment + routing
-│   ├── SentimentPanel.jsx  # Real-time sentiment + trend
-│   ├── ModelControls.jsx   # Provider toggles + grouped models
-│   ├── AnalyticsDashboard.jsx
-│   ├── attachments/        # Generated file/image renderers
-│   └── ...
+│   ├── ChatPage.jsx        # sidebar | thread | sentiment + routing
+│   ├── SentimentPanel.jsx
+│   ├── ModelControls.jsx
+│   └── attachments/        # Generated file/image renderers
 └── api/
     ├── chat.js             # streamChat() SSE
     ├── sentiment.js
-    ├── settings.js         # model-settings + provider-settings
-    └── generations.js
+    └── settings.js
 ```
+
+**Chat routing panel badges:** Document Context Used, 🌐 Web Research, Sentiment-aware response, generation modality.
 
 ---
 
@@ -161,34 +160,30 @@ frontend/src/
 
 `POST /chat/stream` events: `routing_start`, `routing_complete`, `token`, `generation_*`, `artifact`, `complete`, `error`.
 
+`routing_complete` and `complete` include `web_research_used`, `web_sources`, `web_fallback_used`, sentiment fields.
+
 ---
 
 ## Data Model (key tables)
 
 | Table | Purpose |
 |-------|---------|
-| `users` | Auth, role (user/admin) |
-| `conversations` | Per-user threads |
-| `messages` | User + assistant content; generation artifact refs |
-| `model_runs` | Routing metadata, provider, costs |
-| `provider_settings` | Org-wide provider enable/disable |
-| `admin_model_settings` | Per-model org toggles |
-| `user_model_settings` | Per-user model preferences |
+| `model_runs` | Routing, RAG metadata, **web research metadata**, costs |
 | `message_sentiments` | Per-user-message tone analysis |
-| `generated_documents` / `generated_images` | Generation artifacts |
+| `provider_settings` | Org-wide provider enable/disable |
 | `uploaded_documents` | RAG file metadata |
-| `user_api_keys` | Encrypted provider keys |
-| `activity_logs` | Timestamped events |
+| `activity_logs` | `web_research_started/completed`, routing, RAG, etc. |
+
+Web research on `model_runs`: `web_research_used`, `web_search_query`, `web_search_provider`, `web_sources_json`, `web_scrape_duration_ms`.
 
 ---
 
-## Deployment Topology
+## Deployment
 
-| Service | Host | Notes |
-|---------|------|-------|
-| API | Render | `render.yaml`; `/health` check |
-| Frontend | Vercel | `VITE_API_BASE` at build time |
-| SQLite | Render disk (optional) | `/var/data` |
-| ChromaDB + generated files | Render disk (optional) | `CHROMA_PERSIST_DIR`, `GENERATED_FILES_DIR` |
+| Service | Host |
+|---------|------|
+| API | Render |
+| Frontend | Vercel |
+| SQLite + ChromaDB + generated files | Render disk (optional) |
 
 See [deploy-render.md](deploy-render.md) and [deploy-vercel.md](deploy-vercel.md).

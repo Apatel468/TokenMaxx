@@ -70,6 +70,69 @@ function RagContextMeta({ ragUsed = false, filenames = [] }) {
   );
 }
 
+function WebResearchMeta({
+  webResearchUsed = false,
+  sources = [],
+  sourceCount = 0,
+  searchQuery = "",
+  fallbackUsed = false,
+  originalBlockedUrls = [],
+}) {
+  if (!webResearchUsed) return null;
+
+  const safeSources = Array.isArray(sources) ? sources : [];
+  const count = sourceCount || safeSources.length;
+  const blocked = Array.isArray(originalBlockedUrls) ? originalBlockedUrls : [];
+
+  return (
+    <div className="web-research-meta">
+      <span className="web-research-badge">🌐 Web Research</span>
+      {fallbackUsed && (
+        <span className="web-research-fallback-badge" role="status">
+          Alternate sources (original link blocked)
+        </span>
+      )}
+      {count > 0 && (
+        <span className="web-research-count">
+          {count} source{count === 1 ? "" : "s"}
+        </span>
+      )}
+      {searchQuery && (
+        <span className="web-research-query">Query: {searchQuery}</span>
+      )}
+      {fallbackUsed && blocked.length > 0 && (
+        <span className="web-research-blocked">
+          Blocked:{" "}
+          {blocked
+            .map((u) => {
+              try {
+                return new URL(u).hostname;
+              } catch {
+                return u;
+              }
+            })
+            .join(", ")}
+        </span>
+      )}
+      {safeSources.length > 0 && (
+        <ul className="web-research-sources">
+          {safeSources.map((src) => (
+            <li key={src.url || src.title}>
+              <a
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="web-research-link"
+              >
+                🔗 {src.title || src.url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 
 function ChatPage({ onChatComplete, enhancePrompts = true }) {
@@ -614,6 +677,30 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                   : isActiveStream && Array.isArray(result?.source_filenames)
                     ? result.source_filenames
                     : [];
+              const webResearchUsed =
+                Boolean(msg.web_research_used) ||
+                (isActiveStream && Boolean(result?.web_research_used));
+              const webSources =
+                Array.isArray(msg.web_sources) && msg.web_sources.length > 0
+                  ? msg.web_sources
+                  : isActiveStream && Array.isArray(result?.web_sources)
+                    ? result.web_sources
+                    : [];
+              const webSearchQuery =
+                msg.web_search_query ||
+                (isActiveStream ? result?.web_search_query : "") ||
+                "";
+              const webFallbackUsed =
+                Boolean(msg.web_fallback_used) ||
+                (isActiveStream && Boolean(result?.web_fallback_used));
+              const webOriginalBlockedUrls =
+                Array.isArray(msg.web_original_blocked_urls) &&
+                msg.web_original_blocked_urls.length > 0
+                  ? msg.web_original_blocked_urls
+                  : isActiveStream &&
+                      Array.isArray(result?.web_original_blocked_urls)
+                    ? result.web_original_blocked_urls
+                    : [];
 
               return (
 
@@ -637,6 +724,18 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     </p>
                     <p className="thread-msg__text">{msg.content}</p>
                     <RagContextMeta ragUsed={ragUsed} filenames={ragFilenames} />
+                    <WebResearchMeta
+                      webResearchUsed={webResearchUsed}
+                      sources={webSources}
+                      sourceCount={
+                        isActiveStream
+                          ? result?.web_source_count
+                          : webSources.length
+                      }
+                      searchQuery={webSearchQuery}
+                      fallbackUsed={webFallbackUsed}
+                      originalBlockedUrls={webOriginalBlockedUrls}
+                    />
                     <PromptEnhancementViewer
                       originalPrompt={msg.original_prompt}
                       enhancedPrompt={msg.enhanced_prompt}
@@ -659,6 +758,16 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     </p>
                     {!isStreaming && (
                       <RagContextMeta ragUsed={ragUsed} filenames={ragFilenames} />
+                    )}
+                    {!isStreaming && (
+                      <WebResearchMeta
+                        webResearchUsed={webResearchUsed}
+                        sources={webSources}
+                        sourceCount={webSources.length}
+                        searchQuery={webSearchQuery}
+                        fallbackUsed={webFallbackUsed}
+                        originalBlockedUrls={webOriginalBlockedUrls}
+                      />
                     )}
                     {!isStreaming && (
                       <PromptEnhancementViewer
@@ -815,11 +924,39 @@ function ChatPage({ onChatComplete, enhancePrompts = true }) {
                     />
                   )}
 
+                  {result.web_research_used && (
+                    <WebResearchMeta
+                      webResearchUsed={Boolean(result.web_research_used)}
+                      sources={
+                        Array.isArray(result.web_sources)
+                          ? result.web_sources
+                          : []
+                      }
+                      sourceCount={result.web_source_count || 0}
+                      searchQuery={result.web_search_query || ""}
+                      fallbackUsed={Boolean(result.web_fallback_used)}
+                      originalBlockedUrls={
+                        Array.isArray(result.web_original_blocked_urls)
+                          ? result.web_original_blocked_urls
+                          : []
+                      }
+                    />
+                  )}
+
                   {result.modality && result.modality !== "chat" && (
                     <div className="routing-modality-badge" role="status">
                       {result.modality === "document"
                         ? "Document Generation"
                         : "Image Generation"}
+                    </div>
+                  )}
+
+                  {result.sentiment_style_applied && (
+                    <div className="routing-sentiment-badge" role="status">
+                      Sentiment-aware response
+                      {result.sentiment_label
+                        ? ` (${result.sentiment_label})`
+                        : ""}
                     </div>
                   )}
 

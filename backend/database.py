@@ -356,6 +356,16 @@ class ModelRun(Base):
     rag_source_documents = Column(Text, nullable=True)
     rag_source_filenames = Column(Text, nullable=True)
 
+    # Web research metadata
+    web_research_used = Column(Boolean, nullable=False, default=False)
+    web_search_query = Column(Text, nullable=True)
+    web_search_provider = Column(String(30), nullable=True)
+    web_source_urls = Column(Text, nullable=True)
+    web_source_titles = Column(Text, nullable=True)
+    web_sources_json = Column(Text, nullable=True)
+    web_scrape_duration_ms = Column(Float, nullable=True)
+    web_source_count = Column(Integer, nullable=True)
+
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
@@ -526,6 +536,7 @@ def init_db() -> None:
     _migrate_classification_columns()
     _migrate_prompt_intelligence_columns()
     _migrate_rag_columns()
+    _migrate_web_research_columns()
     _migrate_api_keys_and_logs_tables()
     _migrate_model_runs_provider_column()
     _migrate_generation_tables()
@@ -749,6 +760,33 @@ def _migrate_rag_columns() -> None:
         ("rag_chunk_count", "INTEGER"),
         ("rag_source_documents", "TEXT"),
         ("rag_source_filenames", "TEXT"),
+    )
+    with engine.connect() as conn:
+        for column_name, column_type in new_columns:
+            if _table_has_column(conn, "model_runs", column_name):
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE model_runs ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+                conn.commit()
+            except OperationalError:
+                conn.rollback()
+
+
+def _migrate_web_research_columns() -> None:
+    """Add web research metadata columns to model_runs."""
+    new_columns = (
+        ("web_research_used", "BOOLEAN DEFAULT 0"),
+        ("web_search_query", "TEXT"),
+        ("web_search_provider", "VARCHAR(30)"),
+        ("web_source_urls", "TEXT"),
+        ("web_source_titles", "TEXT"),
+        ("web_sources_json", "TEXT"),
+        ("web_scrape_duration_ms", "FLOAT"),
+        ("web_source_count", "INTEGER"),
     )
     with engine.connect() as conn:
         for column_name, column_type in new_columns:
